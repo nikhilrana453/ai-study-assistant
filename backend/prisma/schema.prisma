@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+ 
+}
+
+model User {
+  id          String        @id @default(uuid())
+  name        String
+  email       String        @unique
+  password    String
+  role        Role          @default(STUDENT)
+  createdAt   DateTime      @default(now())
+  enrollments Enrollment[]
+  sessions    ChatSession[]
+  bookmarks   Bookmark[]
+}
+
+model Course {
+  id          String        @id @default(uuid())
+  name        String
+  subject     String
+  description String?
+  createdAt   DateTime      @default(now())
+  enrollments Enrollment[]
+  materials   Material[]
+  sessions    ChatSession[]
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  userId    String
+  courseId  String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  course    Course   @relation(fields: [courseId], references: [id])
+  @@unique([userId, courseId])
+}
+
+model Material {
+  id        String   @id @default(uuid())
+  courseId  String
+  title     String
+  type      String
+  filePath  String
+  topic     String?
+  week      Int?
+  createdAt DateTime @default(now())
+  course    Course   @relation(fields: [courseId], references: [id])
+}
+
+model ChatSession {
+  id        String    @id @default(uuid())
+  userId    String
+  courseId  String
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+  course    Course    @relation(fields: [courseId], references: [id])
+  messages  Message[]
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  sessionId String
+  role      String
+  content   String
+  sources   Json?
+  createdAt DateTime    @default(now())
+  session   ChatSession @relation(fields: [sessionId], references: [id])
+  feedback  Feedback?
+  bookmarks Bookmark[]
+}
+
+model Feedback {
+  id        String  @id @default(uuid())
+  messageId String  @unique
+  rating    Int
+  message   Message @relation(fields: [messageId], references: [id])
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  messageId String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  message   Message  @relation(fields: [messageId], references: [id])
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+}
