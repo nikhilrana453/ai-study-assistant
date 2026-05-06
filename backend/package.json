@@ -1,7 +1,8 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "main": "src/index.js",
+  "description": "",
+  "main": "index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
@@ -9,6 +10,10 @@
     "db:seed": "node prisma/seed.js",
     "db:studio": "prisma studio"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^7.8.0",
     "axios": "^1.16.0",
