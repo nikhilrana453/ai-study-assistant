@@ -1,13 +1,11 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../prismaClient');
 const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
-// REGISTER
 router.post('/register', async (req, res) => {
   const { name, email, password } = req.body;
 
@@ -31,7 +29,6 @@ router.post('/register', async (req, res) => {
   });
 });
 
-// LOGIN
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -54,7 +51,6 @@ router.post('/login', async (req, res) => {
   });
 });
 
-// GET CURRENT USER
 router.get('/me', authenticateToken, (req, res) => {
   const { id, name, email, role } = req.user;
   res.json({ id, name, email, role });
