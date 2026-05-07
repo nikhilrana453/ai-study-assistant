@@ -1,8 +1,6 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../prismaClient');
 
 const checkEnrollment = async (req, res, next) => {
-  // Admins bypass the enrollment check
   if (req.user.role === 'ADMIN') return next();
 
   const courseId =
