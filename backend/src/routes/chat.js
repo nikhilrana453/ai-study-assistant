@@ -7,6 +7,51 @@ const { searchMaterials } = require('../services/ragService');
 
 const router = express.Router();
 
+// TEST ROUTE
+router.get('/test', async (req, res) => {
+  try {
+    const answer = await chat(
+      [{ role: 'user', content: 'Say hello in one sentence' }],
+      'You are a helpful assistant'
+    );
+    res.json({ answer });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// COURSE ID HELPER - get all course ids
+router.get('/course-id-helper', async (req, res) => {
+  try {
+    const courses = await prisma.course.findMany({
+      select: { id: true, name: true }
+    });
+    res.json(courses);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CHECK CHUNKS ROUTE - see what was extracted from PDF
+router.get('/check-chunks', async (req, res) => {
+  try {
+    const results = await searchMaterials(
+      'metaphors UI design',
+      req.query.courseId
+    );
+    res.json({
+      chunksFound: results.length,
+      content: results.map(r => ({
+        text: r.text,
+        source: r.metadata.materialTitle
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/chat/message
 router.post('/message', authenticateToken, checkEnrollment, async (req, res) => {
   const { question, courseId, hintMode } = req.body;
 
@@ -32,18 +77,33 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
     sources = [...new Set(relevantChunks.map(c => c.metadata.materialTitle))];
   }
 
-  // Build system prompt with context
+  // Build strict system prompt
   const systemPrompt = hintMode
-    ? `You are a helpful study tutor for the course "${course.name}".
-       Do NOT give the full answer directly.
-       Guide the student with hints to make them think.
-       ${context}`
-    : `You are a helpful study tutor for the course "${course.name}".
-       Answer questions clearly using the provided course materials.
-       If materials are provided, base your answer on them.
-       Always mention which materials you used.
-       ${context}`;
+  ? `SYSTEM: You are a tutor for "${course.name}".
+     RULE 1: Use ONLY the TEXT section below. Nothing else.
+     RULE 2: Give hints only. No direct answers.
+     RULE 3: If topic not in TEXT say exactly: "This is not covered in your uploaded materials."
+     RULE 4: Do not use internet knowledge. Do not make up examples.
+     RULE 5: Do NOT ask follow up questions.
+     RULE 6: Do NOT say "Would you like to know more".
+     RULE 7: End your answer after listing the points from the TEXT.
 
+     TEXT:
+     ${context.length > 0 ? context : 'NO MATERIALS FOUND FOR THIS TOPIC.'}`
+  : `SYSTEM: You are a tutor for "${course.name}".
+     RULE 1: Read the TEXT section below carefully.
+     RULE 2: Answer using ONLY information from the TEXT section.
+     RULE 3: Start your answer with "According to your lecture notes:"
+     RULE 4: Copy bullet points word for word from the TEXT below.
+     RULE 5: Do NOT add examples not in the TEXT.
+     RULE 6: Do NOT use any outside knowledge.
+     RULE 7: Do NOT ask follow up questions like "Would you like to know more".
+     RULE 8: Do NOT add closing sentences.
+     RULE 9: Stop after listing all relevant points from the TEXT.
+     RULE 10: If topic not in TEXT say exactly: "This topic is not in your uploaded course materials."
+
+     TEXT:
+     ${context.length > 0 ? context : 'NO MATERIALS FOUND FOR THIS TOPIC.'}`;
   // Get or create chat session
   let session = await prisma.chatSession.findFirst({
     where: { userId: req.user.id, courseId }
@@ -92,6 +152,7 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
   });
 });
 
+// GET /api/chat/history
 router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId } = req.query;
   const session = await prisma.chatSession.findFirst({
@@ -102,6 +163,7 @@ router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   res.json({ messages: session.messages, sessionId: session.id });
 });
 
+// GET /api/chat/sessions
 router.get('/sessions', authenticateToken, async (req, res) => {
   const { courseId } = req.query;
   const sessions = await prisma.chatSession.findMany({

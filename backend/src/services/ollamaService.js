@@ -9,7 +9,12 @@ const chat = async (messages, systemPrompt) => {
       { role: 'system', content: systemPrompt },
       ...messages
     ],
-    stream: false
+    stream: false,
+    options: {
+      temperature: 0.1,      // ← very low = strict and focused
+      top_p: 0.5,            // ← limits random word choices
+      repeat_penalty: 1.3    // ← stops repeating itself
+    }
   });
   return response.data.message.content;
 };
