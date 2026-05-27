@@ -1,11 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const pdfParse = require('pdf-parse');
+const pdfParse = require('pdf-parse/lib/pdf-parse.js');
 const mammoth = require('mammoth');
 
 const extractText = async (filePath, mimetype) => {
   try {
     if (mimetype === 'application/pdf') {
+      const fs = require('fs');
       const dataBuffer = fs.readFileSync(filePath);
       const data = await pdfParse(dataBuffer);
       return data.text;
@@ -19,8 +18,8 @@ const extractText = async (filePath, mimetype) => {
       return result.value;
     }
 
-    // For text files
     if (mimetype === 'text/plain') {
+      const fs = require('fs');
       return fs.readFileSync(filePath, 'utf8');
     }
 
