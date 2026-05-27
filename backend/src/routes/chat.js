@@ -3,23 +3,10 @@ const prisma = require('../prismaClient');
 const { authenticateToken } = require('../middleware/auth');
 const { checkEnrollment } = require('../middleware/checkEnrollment');
 const { chat } = require('../services/ollamaService');
+const { searchMaterials } = require('../services/ragService');
 
 const router = express.Router();
 
-// TEMPORARY TEST ROUTE - no auth needed
-router.get('/test', async (req, res) => {
-  try {
-    const answer = await chat(
-      [{ role: 'user', content: 'Say hello in one sentence' }],
-      'You are a helpful assistant'
-    );
-    res.json({ answer });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/chat/message
 router.post('/message', authenticateToken, checkEnrollment, async (req, res) => {
   const { question, courseId, hintMode } = req.body;
 
@@ -27,18 +14,37 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
     return res.status(400).json({ error: 'question and courseId required' });
 
   const course = await prisma.course.findUnique({ where: { id: courseId } });
-  if (!course)
-    return res.status(404).json({ error: 'Course not found' });
+  if (!course) return res.status(404).json({ error: 'Course not found' });
 
+  // Search for relevant materials using RAG
+  const relevantChunks = await searchMaterials(question, courseId);
+
+  // Build context from relevant materials
+  let context = '';
+  let sources = [];
+
+  if (relevantChunks.length > 0) {
+    context = '\n\nRelevant course materials:\n' +
+      relevantChunks.map((chunk, i) =>
+        `[Source ${i + 1}: ${chunk.metadata.materialTitle}]\n${chunk.text}`
+      ).join('\n\n');
+
+    sources = [...new Set(relevantChunks.map(c => c.metadata.materialTitle))];
+  }
+
+  // Build system prompt with context
   const systemPrompt = hintMode
     ? `You are a helpful study tutor for the course "${course.name}".
        Do NOT give the full answer directly.
-       Guide the student with hints and ask questions to make them think.
-       Keep hints short and encouraging.`
+       Guide the student with hints to make them think.
+       ${context}`
     : `You are a helpful study tutor for the course "${course.name}".
-       Answer questions clearly and accurately.
-       Be concise, educational and encouraging.`;
+       Answer questions clearly using the provided course materials.
+       If materials are provided, base your answer on them.
+       Always mention which materials you used.
+       ${context}`;
 
+  // Get or create chat session
   let session = await prisma.chatSession.findFirst({
     where: { userId: req.user.id, courseId }
   });
@@ -49,10 +55,12 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
     });
   }
 
+  // Save user message
   await prisma.message.create({
     data: { sessionId: session.id, role: 'user', content: question }
   });
 
+  // Get recent messages for context
   const recentMessages = await prisma.message.findMany({
     where: { sessionId: session.id },
     orderBy: { createdAt: 'desc' },
@@ -63,40 +71,44 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
     .reverse()
     .map(m => ({ role: m.role, content: m.content }));
 
+  // Call Ollama
   const answer = await chat(messages, systemPrompt);
 
+  // Save assistant response with sources
   const savedMessage = await prisma.message.create({
-    data: { sessionId: session.id, role: 'assistant', content: answer }
+    data: {
+      sessionId: session.id,
+      role: 'assistant',
+      content: answer,
+      sources: sources.length > 0 ? sources : null
+    }
   });
 
-  res.json({ answer, messageId: savedMessage.id, sessionId: session.id });
+  res.json({
+    answer,
+    sources,
+    messageId: savedMessage.id,
+    sessionId: session.id
+  });
 });
 
-// GET /api/chat/history?courseId=xxx
 router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId } = req.query;
-
   const session = await prisma.chatSession.findFirst({
     where: { userId: req.user.id, courseId },
     include: { messages: { orderBy: { createdAt: 'asc' } } }
   });
-
   if (!session) return res.json({ messages: [] });
   res.json({ messages: session.messages, sessionId: session.id });
 });
 
-// GET /api/chat/sessions?courseId=xxx
 router.get('/sessions', authenticateToken, async (req, res) => {
   const { courseId } = req.query;
-
   const sessions = await prisma.chatSession.findMany({
     where: { userId: req.user.id, courseId },
-    include: {
-      messages: { take: 1, orderBy: { createdAt: 'asc' } }
-    },
+    include: { messages: { take: 1, orderBy: { createdAt: 'asc' } } },
     orderBy: { createdAt: 'desc' }
   });
-
   res.json(sessions);
 });
 

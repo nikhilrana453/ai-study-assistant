@@ -5,10 +5,10 @@ const fs = require('fs');
 const prisma = require('../prismaClient');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { checkEnrollment } = require('../middleware/checkEnrollment');
+const { processMaterial } = require('../services/ragService');
 
 const router = express.Router();
 
-// Setup multer storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(__dirname, '../../uploads', req.body.courseId || 'general');
@@ -23,7 +23,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = [
       'application/pdf',
@@ -31,15 +31,10 @@ const upload = multer({
       'application/msword',
       'text/plain'
     ];
-    if (allowed.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF, DOCX, DOC, TXT files are allowed'));
-    }
+    allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid file type'));
   }
 });
 
-// POST /api/materials/upload (admin only)
 router.post(
   '/upload',
   authenticateToken,
@@ -65,22 +60,22 @@ router.post(
       }
     });
 
+    // Process material in background (dont wait for it)
+    processMaterial(material).catch(console.error);
+
     res.status(201).json({
-      message: 'File uploaded successfully',
+      message: 'File uploaded and being processed for AI search',
       material
     });
   }
 );
 
-// GET /api/materials?courseId=xxx (enrolled students only)
 router.get('/', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId } = req.query;
-
   const materials = await prisma.material.findMany({
     where: { courseId },
     orderBy: { createdAt: 'desc' }
   });
-
   res.json(materials);
 });
 
