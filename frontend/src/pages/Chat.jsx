@@ -16,7 +16,6 @@ export default function Chat() {
   const [error, setError] = useState('');
   const bottomRef = useRef(null);
 
-  // Load course name and chat history
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -35,7 +34,6 @@ export default function Chat() {
     loadData();
   }, [courseId]);
 
-  // Auto scroll to bottom
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -98,7 +96,6 @@ export default function Chat() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Hint Mode Toggle */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500">Hint Mode</span>
               <button
@@ -134,7 +131,6 @@ export default function Chat() {
       {/* Main Chat Area */}
       <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-6 flex flex-col">
 
-        {/* Messages */}
         <div className="flex-1 space-y-4 mb-4 min-h-96">
 
           {/* Empty state */}
@@ -175,7 +171,7 @@ export default function Chat() {
                 msg.role === 'user' ? 'justify-end' : 'justify-start'
               }`}
             >
-              <div className={`max-w-[80%] ${msg.role === 'user' ? '' : 'w-full'}`}>
+              <div className={`max-w-[75%] ${msg.role === 'user' ? '' : 'w-full'}`}>
 
                 {/* Bubble */}
                 <div
@@ -188,7 +184,7 @@ export default function Chat() {
                   {msg.role === 'assistant' && (
                     <div className="flex items-center gap-1 mb-2 pb-2 border-b border-gray-100">
                       <span className="text-xs font-medium text-gray-400">
-                        {hintMode ? '💡 Hint' : '🤖 AI Tutor'}
+                        {hintMode ? '💡 Hint Mode' : '🤖 AI Tutor'}
                       </span>
                     </div>
                   )}
@@ -210,6 +206,18 @@ export default function Chat() {
                     ))}
                   </div>
                 )}
+
+                {/* Timestamp */}
+                <p className={`text-xs text-gray-300 mt-1 ${
+                  msg.role === 'user' ? 'text-right' : 'text-left'
+                }`}>
+                  {msg.createdAt
+                    ? new Date(msg.createdAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })
+                    : ''}
+                </p>
               </div>
             </div>
           ))}
