@@ -100,7 +100,7 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
      RULE 7: Do NOT ask follow up questions like "Would you like to know more".
      RULE 8: Do NOT add closing sentences.
      RULE 9: Stop after listing all relevant points from the TEXT.
-     RULE 10: If topic not in TEXT say exactly: "This topic is not in your uploaded course materials."
+     RULE 10:"This topic is not in your uploaded course materials."
 
      TEXT:
      ${context.length > 0 ? context : 'NO MATERIALS FOUND FOR THIS TOPIC.'}`;
