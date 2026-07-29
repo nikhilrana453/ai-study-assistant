@@ -1,29 +1,43 @@
-require('dotenv').config();
-require('express-async-errors');
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+require('dotenv').config();
 
 const app = express();
 
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
+// Allow both local and Vercel frontend
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    process.env.FRONTEND_URL,
+  ].filter(Boolean),
+  credentials: true,
+}));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Routes added week by week
-app.use('/api/auth',      require('./routes/auth'));
-app.use('/api/courses',   require('./routes/courses'));
-app.use('/api/chat',      require('./routes/chat'));
-app.use('/api/materials', require('./routes/materials'));
-app.use('/api/admin',     require('./routes/admin'));
+// Routes
+const authRoutes     = require('./routes/auth');
+const courseRoutes   = require('./routes/courses');
+const chatRoutes     = require('./routes/chat');
+const materialRoutes = require('./routes/materials');
+const adminRoutes    = require('./routes/admin');
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error(err.message);
-  res.status(500).json({ error: err.message || 'Server error' });
+app.use('/api/auth',      authRoutes);
+app.use('/api/courses',   courseRoutes);
+app.use('/api/chat',      chatRoutes);
+app.use('/api/materials', materialRoutes);
+app.use('/api/admin',     adminRoutes);
+
+// Health check — Railway uses this to confirm app is running
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'AI Study Assistant Backend Running' });
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
