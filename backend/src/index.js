@@ -7,13 +7,9 @@ const path = require('path');
 const app = express();
 
 // ── CORS ─────────────────────────────────────────────
-// Allows localhost for dev and Vercel URL for production
+// Allow all origins to fix Vercel → Render CORS issue
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    process.env.FRONTEND_URL,
-  ].filter(Boolean),
+  origin: true,
   credentials: true,
 }));
 
@@ -28,7 +24,6 @@ app.use('/api/materials', require('./routes/materials'));
 app.use('/api/admin',     require('./routes/admin'));
 
 // ── Health Check ─────────────────────────────────────
-// Railway checks this to confirm app is running
 app.get('/', (req, res) => {
   res.json({ status: 'OK', message: 'AI Study Assistant API Running' });
 });
@@ -44,7 +39,6 @@ app.use((err, req, res, next) => {
 });
 
 // ── Start Server ──────────────────────────────────────
-// 0.0.0.0 required for Railway to expose the port
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running on port ${PORT}`);
