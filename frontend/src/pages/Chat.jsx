@@ -335,37 +335,120 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
-    const userMessage = { role: 'user', content: input };
-    setMessages(prev => [...prev, userMessage]);
-    const currentInput = input;
-    setInput('');
-    setLoading(true);
-    setError('');
-    try {
-      const res = await api.post('/chat/message', {
-        question: currentInput,
-        courseId,
-        hintMode,
-        ...(currentSessionId ? { sessionId: currentSessionId } : {}),
-      });
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: res.data.answer,
-        sources: res.data.sources || [],
-      }]);
-      setCurrentSessionId(res.data.sessionId);
-      const sessionsRes = await api.get(`/chat/sessions?courseId=${courseId}`);
-      setSessions(sessionsRes.data);
-    } catch (err) {
-      setError('Failed to get response. Make sure Ollama is running.');
-      setMessages(prev => prev.slice(0, -1));
-      setInput(currentInput);
-    } finally {
-      setLoading(false);
+const sendMessage = async () => {
+  if (!input.trim() || loading) return;
+  const question = input.trim();
+  setInput('');
+  setLoading(true);
+
+  // Show user message immediately
+  setMessages(prev => [...prev, {
+    role: 'user',
+    content: question
+  }]);
+
+  // Add empty AI message — fills word by word
+  setMessages(prev => [...prev, {
+    role: 'assistant',
+    content: '',
+    sources: [],
+    streaming: true
+  }]);
+
+  try {
+    const token = localStorage.getItem('token');
+    const baseURL = import.meta.env.VITE_API_URL
+      ? import.meta.env.VITE_API_URL.replace('/api', '')
+      : 'http://localhost:5000';
+
+    const response = await fetch(
+      `${baseURL}/api/chat/message/stream`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ question, courseId, hintMode })
+      }
+    );
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullAnswer = '';
+    let sources = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.sources) {
+              sources = data.sources;
+            }
+
+            if (data.token) {
+              fullAnswer += data.token;
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: 'assistant',
+                  content: fullAnswer,
+                  sources,
+                  streaming: true
+                };
+                return updated;
+              });
+            }
+
+            if (data.done) {
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role: 'assistant',
+                  content: fullAnswer,
+                  sources,
+                  streaming: false
+                };
+                return updated;
+              });
+
+              if (!sessionId) {
+                const sessRes = await api.get(`/chat/sessions?courseId=${courseId}`);
+                if (sessRes.data.length > 0) {
+                  setSessionId(sessRes.data[0].id);
+                  setSessions(sessRes.data);
+                }
+              }
+            }
+          } catch (e) {
+            // skip malformed lines
+          }
+        }
+      }
     }
-  };
+  } catch (err) {
+    setMessages(prev => {
+      const updated = [...prev];
+      updated[updated.length - 1] = {
+        role: 'assistant',
+        content: 'Something went wrong. Please try again.',
+        sources: [],
+        streaming: false
+      };
+      return updated;
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadSession = async (session) => {
     setCurrentSessionId(session.id);
@@ -515,15 +598,14 @@ export default function Chat() {
                     <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{msg.content}</p>
                   </div>
 
-                  {msg.role === 'assistant' && msg.sources?.length > 0 && (
-                    <div style={S.sources}>
-                      <p style={{ ...S.sourcesLabel, margin: '0 0 0.3rem' }}>📚 Sources Used</p>
-                      {msg.sources.map((src, j) => (
-                        <p key={j} style={{ ...S.sourceItem, margin: '0.1rem 0' }}>• {src}</p>
-                      ))}
+                  {msg.role === 'assistant' && (
+                   <div className="prose prose-sm max-w-none prose-p:my-1">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  {msg.streaming && (
+                   <span className="inline-block w-2 h-4 bg-gray-400 animate-pulse ml-0.5 align-middle" />
+                     )}
                     </div>
-                  )}
-
+                    )}
                   <p style={S.timestamp(msg.role === 'user')}>
                     {msg.createdAt
                       ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
