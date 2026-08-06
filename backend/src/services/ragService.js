@@ -1,4 +1,4 @@
-const { embed } = require('./ollamaService');
+const { embed } = require('./openaiService');
 const { addDocuments, searchDocuments } = require('./chromaService');
 const { extractText } = require('./fileParser');
 
