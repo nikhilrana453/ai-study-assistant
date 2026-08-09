@@ -50,6 +50,7 @@ model Material {
   week      Int?
   createdAt DateTime @default(now())
   course    Course   @relation(fields: [courseId], references: [id])
+  chunks    MaterialChunk[] 
 }
 
 model ChatSession {
@@ -93,4 +94,17 @@ model Bookmark {
 enum Role {
   STUDENT
   ADMIN
+}
+model MaterialChunk {
+  id            String   @id @default(uuid())
+  materialId    String
+  materialTitle String
+  courseId      String
+  text          String
+  embedding     Float[]
+  chunkIndex    Int
+  topic         String?
+  week          String?
+  createdAt     DateTime @default(now())
+  material      Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 }
