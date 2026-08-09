@@ -4,7 +4,7 @@ const { authenticateToken } = require('../middleware/auth');
 const { checkEnrollment } = require('../middleware/checkEnrollment');
 const { chat, chatStream } = require('../services/openaiService');
 const { searchMaterials } = require('../services/ragService');
-
+const { checkInputSafety, checkScope } = require('../services/guardrails');
 const router = express.Router();
 
 // TEST ROUTE
