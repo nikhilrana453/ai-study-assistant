@@ -96,15 +96,15 @@ enum Role {
   ADMIN
 }
 model MaterialChunk {
-  id            String   @id @default(uuid())
+  id            String                        @id @default(uuid())
   materialId    String
   materialTitle String
   courseId      String
   text          String
-  embedding     Float[]
+  embedding     Unsupported("vector(1536)")?
   chunkIndex    Int
   topic         String?
   week          String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime                      @default(now())
   material      Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 }
