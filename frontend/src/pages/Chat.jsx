@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import ReactMarkdown from 'react-markdown';
 
 // ─── Light, eye-friendly palette ─────────────────────────────────────────────
 const C = {
