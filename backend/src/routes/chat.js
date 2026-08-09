@@ -6,7 +6,7 @@ const { chat, chatStream } = require('../services/openaiService');
 const { searchMaterials } = require('../services/ragService');
 const { checkInputSafety, checkScope } = require('../services/guardrails');
 const router = express.Router();
-
+ 
 // TEST ROUTE
 router.get('/test', async (req, res) => {
   try {
@@ -19,7 +19,7 @@ router.get('/test', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // COURSE ID HELPER - get all course ids
 router.get('/course-id-helper', async (req, res) => {
   try {
@@ -31,7 +31,7 @@ router.get('/course-id-helper', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // CHECK CHUNKS ROUTE - see what was extracted from PDF
 router.get('/check-chunks', async (req, res) => {
   try {
@@ -50,33 +50,33 @@ router.get('/check-chunks', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // POST /api/chat/message
 router.post('/message', authenticateToken, checkEnrollment, async (req, res) => {
   const { question, courseId, hintMode } = req.body;
-
+ 
   if (!question || !courseId)
     return res.status(400).json({ error: 'question and courseId required' });
-
+ 
   const course = await prisma.course.findUnique({ where: { id: courseId } });
   if (!course) return res.status(404).json({ error: 'Course not found' });
-
+ 
   // Search for relevant materials using RAG
   const relevantChunks = await searchMaterials(question, courseId);
-
+ 
   // Build context from relevant materials
   let context = '';
   let sources = [];
-
+ 
   if (relevantChunks.length > 0) {
     context = '\n\nRelevant course materials:\n' +
       relevantChunks.map((chunk, i) =>
         `[Source ${i + 1}: ${chunk.metadata.materialTitle}]\n${chunk.text}`
       ).join('\n\n');
-
+ 
     sources = [...new Set(relevantChunks.map(c => c.metadata.materialTitle))];
   }
-
+ 
   // Build strict system prompt
   const systemPrompt = hintMode
   ? `SYSTEM: You are a tutor for "${course.name}".
@@ -87,7 +87,7 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
      RULE 5: Do NOT ask follow up questions.
      RULE 6: Do NOT say "Would you like to know more".
      RULE 7: End your answer after listing the points from the TEXT.
-
+ 
      TEXT:
      ${context.length > 0 ? context : 'NO MATERIALS FOUND FOR THIS TOPIC.'}`
   : `SYSTEM: You are a tutor for "${course.name}".
@@ -101,39 +101,39 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
      RULE 8: Do NOT add closing sentences.
      RULE 9: Stop after listing all relevant points from the TEXT.
      RULE 10:"This topic is not in your uploaded course materials."
-
+ 
      TEXT:
      ${context.length > 0 ? context : 'NO MATERIALS FOUND FOR THIS TOPIC.'}`;
   // Get or create chat session
   let session = await prisma.chatSession.findFirst({
     where: { userId: req.user.id, courseId }
   });
-
+ 
   if (!session) {
     session = await prisma.chatSession.create({
       data: { userId: req.user.id, courseId }
     });
   }
-
+ 
   // Save user message
   await prisma.message.create({
     data: { sessionId: session.id, role: 'user', content: question }
   });
-
+ 
   // Get recent messages for context
   const recentMessages = await prisma.message.findMany({
     where: { sessionId: session.id },
     orderBy: { createdAt: 'desc' },
     take: 10
   });
-
+ 
   const messages = recentMessages
     .reverse()
     .map(m => ({ role: m.role, content: m.content }));
-
-  // Call Ollama
+ 
+  // Call OpenAI
   const answer = await chat(messages, systemPrompt);
-
+ 
   // Save assistant response with sources
   const savedMessage = await prisma.message.create({
     data: {
@@ -143,7 +143,7 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
       sources: sources.length > 0 ? sources : null
     }
   });
-
+ 
   res.json({
     answer,
     sources,
@@ -151,7 +151,7 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
     sessionId: session.id
   });
 });
-
+ 
 // GET /api/chat/history
 router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId } = req.query;
@@ -162,7 +162,7 @@ router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   if (!session) return res.json({ messages: [] });
   res.json({ messages: session.messages, sessionId: session.id });
 });
-
+ 
 // GET /api/chat/sessions
 router.get('/sessions', authenticateToken, async (req, res) => {
   const { courseId } = req.query;
@@ -173,21 +173,21 @@ router.get('/sessions', authenticateToken, async (req, res) => {
   });
   res.json(sessions);
 });
-
+ 
 // STREAMING ROUTE
 router.post('/message/stream', authenticateToken, checkEnrollment, async (req, res) => {
   const { question, courseId, hintMode } = req.body;
-
+ 
   if (!question || !courseId) {
     return res.status(400).json({ error: 'question and courseId required' });
   }
-
+ 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
-
+ 
   // Guardrail 1
   const safetyCheck = checkInputSafety(question);
   if (!safetyCheck.safe) {
@@ -195,7 +195,7 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
     res.end();
     return;
   }
-
+ 
   // Guardrail 2
   const scopeCheck = checkScope(question);
   if (!scopeCheck.inScope) {
@@ -203,26 +203,26 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
     res.end();
     return;
   }
-
+ 
   const course = await prisma.course.findUnique({ where: { id: courseId } });
   if (!course) {
     res.write(`data: ${JSON.stringify({ error: 'Course not found' })}\n\n`);
     res.end();
     return;
   }
-
+ 
   // RAG search
   const scopeKeywords = ['scope', 'learn', 'objective', 'outcome', 'module', 'topic', 'cover', 'should'];
   const isScopeQuestion = scopeKeywords.some(k => question.toLowerCase().includes(k));
   const searchQuery = isScopeQuestion
     ? question + ' scope objectives outcomes session'
     : question;
-
+ 
   const relevantChunks = await searchMaterials(searchQuery, courseId);
-
+ 
   let context = '';
   let sources = [];
-
+ 
   if (relevantChunks.length > 0) {
     const topChunks = relevantChunks.slice(0, 3);
     context = '\n\nRelevant course materials:\n' +
@@ -231,55 +231,66 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
       ).join('\n\n');
     sources = [...new Set(topChunks.map(c => c.metadata.materialTitle))];
   }
-
+ 
   const systemPrompt = hintMode
-    ? `You are a technical study tutor for "${course.name}".
-       Use ONLY the TEXT below to give a technical hint.
-       Do NOT use markdown symbols like ** or * or # in your response.
-       If topic not found say only:
+    ? `You are a study tutor for "${course.name}".
+       Use ONLY the TEXT below to give a short hint.
+       Do not give direct answers — guide the student to think.
+       Do not repeat yourself.
+       Do not use markdown symbols like ** or * or #.
+       Do not ask follow up questions.
+       Write in plain sentences only.
+       If the topic is not found in the TEXT below say only this exact sentence:
        "This topic is beyond the scope of this course. Please refer to your lecturer for further guidance."
        TEXT:
        ${context.length > 0 ? context : 'NO MATERIALS FOUND.'}`
-    : `You are a technical study tutor for "${course.name}".
-       Give a precise technical answer using ONLY the TEXT below.
-       Do NOT use markdown symbols like ** * # in your response.
-       If topic not found say only:
+    : `You are a study tutor for "${course.name}".
+       Answer using ONLY the information in the TEXT below.
+       Write your answer ONCE — never repeat any point.
+       Do not use markdown symbols like ** or * or #.
+       Use a dash - for bullet points.
+       Do not add examples not found in the TEXT.
+       Do not use outside knowledge.
+       Do not ask follow up questions.
+       Do not add closing sentences like "Would you like to know more".
+       Stop after listing all relevant points from the TEXT.
+       If the topic is not found in the TEXT below say only this exact sentence:
        "This topic is beyond the scope of this course. Please refer to your lecturer for further guidance."
        TEXT:
        ${context.length > 0 ? context : 'NO MATERIALS FOUND.'}`;
-
+ 
   // Get or create session
   let session = await prisma.chatSession.findFirst({
     where: { userId: req.user.id, courseId }
   });
-
+ 
   if (!session) {
     session = await prisma.chatSession.create({
       data: { userId: req.user.id, courseId }
     });
   }
-
+ 
   // Save user message
   await prisma.message.create({
     data: { sessionId: session.id, role: 'user', content: question }
   });
-
+ 
   // Get recent messages
   const recentMessages = await prisma.message.findMany({
     where: { sessionId: session.id },
     orderBy: { createdAt: 'desc' },
     take: 6
   });
-
+ 
   const messages = recentMessages
     .reverse()
     .map(m => ({ role: m.role, content: m.content }));
-
+ 
   // Send sources first
   res.write(`data: ${JSON.stringify({ sources, sessionId: session.id })}\n\n`);
-
+ 
   // Stream answer word by word
   await chatStream(messages, systemPrompt, res);
 });
-
+ 
 module.exports = router;
