@@ -8,6 +8,8 @@ import Chat           from './pages/Chat';
 import AdminDashboard from './pages/AdminDashboard';
 import UploadMaterial from './pages/UploadMaterial';
 import Bookmarks      from './pages/Bookmarks';
+import Quiz           from './pages/Quiz';
+import Flashcards     from './pages/Flashcards';
 
 function HomeRedirect() {
   const { token, user } = useAuth();
@@ -34,7 +36,12 @@ export default function App() {
           <Route path="/bookmarks" element={
             <ProtectedRoute><Bookmarks /></ProtectedRoute>
           } />
-      
+          <Route path="/quiz/:courseId" element={
+            <ProtectedRoute><Quiz /></ProtectedRoute>
+          } />
+          <Route path="/flashcards/:courseId" element={
+            <ProtectedRoute><Flashcards /></ProtectedRoute>
+          } />
 
           <Route path="/admin" element={
             <ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>
