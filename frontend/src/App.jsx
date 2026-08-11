@@ -21,6 +21,9 @@ export default function App() {
           <Route path="/chat/:courseId" element={
             <ProtectedRoute><Chat /></ProtectedRoute>
           } />
+          <Route path="/bookmarks" element={
+  <ProtectedRoute><Bookmarks /></ProtectedRoute>
+} />
           <Route path="/admin" element={
             <ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>
           } />

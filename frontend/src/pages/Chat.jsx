@@ -21,6 +21,8 @@ export default function Chat() {
   const [sessionLoading, setSessionLoading]     = useState(false);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
+  const [feedbacks, setFeedbacks]   = useState({});
+const [bookmarks, setBookmarks]   = useState({});
 
   // Load course name + sessions + latest history
   useEffect(() => {

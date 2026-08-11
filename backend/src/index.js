@@ -22,6 +22,8 @@ app.use('/api/courses',   require('./routes/courses'));
 app.use('/api/chat',      require('./routes/chat'));
 app.use('/api/materials', require('./routes/materials'));
 app.use('/api/admin',     require('./routes/admin'));
+app.use('/api/feedback',   require('./routes/feedback'));
+app.use('/api/bookmarks',  require('./routes/bookmarks'));
 
 // ── Health Check ─────────────────────────────────────
 app.get('/', (req, res) => {
