@@ -1,261 +1,122 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 
-const S = {
-  page: {
-    minHeight: '100vh',
-    background: '#0f172a',
-    fontFamily: '"DM Sans", system-ui, sans-serif',
-    color: '#f1f5f9',
-  },
-  nav: {
-    background: '#ffffff',
-    borderBottom: '1px solid rgba(99,115,145,0.12)',
-    boxShadow: '0 1px 3px rgba(30,41,59,0.06)',
-    padding: '1rem 1.5rem',
-    position: 'sticky',
-    top: 0,
-    zIndex: 100,
-  },
-  navInner: {
-    maxWidth: '1100px',
-    margin: '0 auto',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  navBrand: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.625rem',
-  },
-  navLogo: {
-    width: '36px',
-    height: '36px',
-    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-    borderRadius: '9px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '18px',
-  },
-  navTitle: {
-    fontFamily: '"Playfair Display", Georgia, serif',
-    fontWeight: '700',
-    fontSize: '1.125rem',
-    color: '#1e293b',
-    letterSpacing: '-0.01em',
-  },
-  navRight: { display: 'flex', alignItems: 'center', gap: '1.25rem' },
-  navGreeting: { fontSize: '0.875rem', color: '#475569' },
-  navName: { color: '#1e293b', fontWeight: '600' },
-  logoutBtn: {
-    background: 'rgba(239,68,68,0.07)',
-    border: '1px solid rgba(239,68,68,0.25)',
-    color: '#dc2626',
-    padding: '0.4rem 0.875rem',
-    borderRadius: '8px',
-    fontSize: '0.8125rem',
-    cursor: 'pointer',
-    fontWeight: '500',
-    transition: 'background 0.2s',
-  },
-  main: {
-    maxWidth: '1100px',
-    margin: '0 auto',
-    padding: '3rem 1.5rem',
-  },
-  pageHeader: { marginBottom: '2.5rem' },
-  pageTitle: {
-    fontFamily: '"Playfair Display", Georgia, serif',
-    fontSize: '2rem',
-    fontWeight: '700',
-    color: '#1e293b',
-    margin: '0 0 0.5rem',
-    letterSpacing: '-0.02em',
-  },
-  pageSubtitle: { fontSize: '0.9375rem', color: '#64748b', margin: 0 },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-    gap: '1.25rem',
-  },
-  card: {
-    background: '#ffffff',
-    border: '1px solid rgba(99,115,145,0.12)',
-    borderRadius: '16px',
-    padding: '1.625rem',
-    cursor: 'pointer',
-    transition: 'border-color 0.2s, transform 0.15s, background 0.2s',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  cardHoverStyle: {
-    borderColor: 'rgba(217,119,6,0.35)',
-    background: '#ffffff',
-    boxShadow: '0 4px 16px rgba(30,41,59,0.08)',
-    transform: 'translateY(-2px)',
-  },
-  cardAccent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '3px',
-    background: 'linear-gradient(90deg, #f59e0b, #d97706)',
-    opacity: 0,
-    transition: 'opacity 0.2s',
-  },
-  cardTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: '1rem',
-  },
-  iconWrap: {
-    width: '48px',
-    height: '48px',
-    borderRadius: '12px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '22px',
-    background: 'rgba(217,119,6,0.07)',
-    border: '1px solid rgba(217,119,6,0.15)',
-  },
-  subjectBadge: {
-    background: 'rgba(99,115,145,0.07)',
-    border: '1px solid rgba(99,115,145,0.14)',
-    color: '#64748b',
-    fontSize: '0.75rem',
-    padding: '0.3rem 0.75rem',
-    borderRadius: '20px',
-    fontWeight: '500',
-    letterSpacing: '0.02em',
-  },
-  courseName: {
-    fontSize: '1.125rem',
-    fontWeight: '700',
-    color: '#1e293b',
-    margin: '0 0 0.375rem',
-    lineHeight: '1.3',
-  },
-  courseDesc: {
-    fontSize: '0.875rem',
-    color: '#475569',
-    margin: '0 0 1.25rem',
-    lineHeight: '1.5',
-    display: '-webkit-box',
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: 'vertical',
-    overflow: 'hidden',
-  },
-  cardFooter: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.375rem',
-    color: '#d97706',
-    fontSize: '0.875rem',
-    fontWeight: '600',
-  },
-  skeleton: {
-    background: '#e8edf5',
-    border: '1px solid rgba(99,115,145,0.08)',
-    borderRadius: '16px',
-    height: '200px',
-    animation: 'pulse 1.5s ease-in-out infinite',
-  },
-  emptyState: {
-    background: '#ffffff',
-    border: '1px solid rgba(99,115,145,0.10)',
-    borderRadius: '16px',
-    padding: '4rem',
-    textAlign: 'center',
-    gridColumn: '1 / -1',
-  },
-  emptyIcon: { fontSize: '3rem', marginBottom: '1rem' },
-  emptyTitle: { fontSize: '1.125rem', fontWeight: '600', color: '#475569', margin: '0 0 0.5rem' },
-  emptyDesc: { fontSize: '0.875rem', color: '#94a3b8', margin: 0 },
-};
-
-const icons = ['📘', '📗', '📙', '📕', '📓', '📒'];
+const COLORS = [
+  { bg:'#eff6ff', border:'#bfdbfe', icon:'#3b82f6', text:'#1d4ed8' },
+  { bg:'#f5f3ff', border:'#ddd6fe', icon:'#8b5cf6', text:'#6d28d9' },
+  { bg:'#ecfdf5', border:'#a7f3d0', icon:'#10b981', text:'#065f46' },
+  { bg:'#fff7ed', border:'#fed7aa', icon:'#f59e0b', text:'#92400e' },
+];
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [hoveredId, setHoveredId] = useState(null);
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     api.get('/courses/my-courses')
-      .then((res) => setCourses(res.data))
+      .then(res => setCourses(res.data))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
-  return (
-    <div style={S.page}>
-      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 
-      <nav style={S.nav}>
-        <div style={S.navInner}>
-          <div style={S.navBrand}>
-            <div style={S.navLogo}>📚</div>
-            <span style={S.navTitle}>Study Assistant</span>
+  return (
+    <div style={{ minHeight:'100vh', background:'#f8fafc', fontFamily:'system-ui,sans-serif' }}>
+
+      {/* Navbar */}
+      <nav style={{ background:'#fff', borderBottom:'1px solid #e2e8f0', padding:'0 1.5rem', position:'sticky', top:0, zIndex:100 }}>
+        <div style={{ maxWidth:'1100px', margin:'0 auto', height:'60px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.625rem' }}>
+            <div style={{ width:'32px', height:'32px', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', borderRadius:'10px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px' }}>📚</div>
+            <span style={{ fontWeight:'700', fontSize:'1rem', color:'#0f172a' }}>AI Study Assistant</span>
           </div>
-          <div style={S.navRight}>
-            <span style={S.navGreeting}>
-              Welcome back, <span style={S.navName}>{user?.name}</span>
-            </span>
-            <button onClick={logout} style={S.logoutBtn}>Logout</button>
+          <div style={{ display:'flex', alignItems:'center', gap:'1rem' }}>
+            {user?.role === 'ADMIN' && (
+              <button onClick={() => navigate('/admin')} style={{ background:'none', border:'none', color:'#6366f1', fontWeight:'600', fontSize:'0.875rem', cursor:'pointer' }}>
+                Admin Panel
+              </button>
+            )}
+            <div style={{ width:'32px', height:'32px', background:'#eff6ff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', fontSize:'13px', color:'#6366f1' }}>
+              {user?.name?.charAt(0).toUpperCase()}
+            </div>
+            <span style={{ fontSize:'0.875rem', color:'#64748b' }}>{user?.name}</span>
+            <button onClick={logout} style={{ background:'#fef2f2', border:'1px solid #fecaca', color:'#dc2626', padding:'0.35rem 0.875rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'500' }}>
+              Sign out
+            </button>
           </div>
         </div>
       </nav>
 
-      <main style={S.main}>
-        <div style={S.pageHeader}>
-          <h2 style={S.pageTitle}>Your Courses</h2>
-          <p style={S.pageSubtitle}>Select a course to start studying with AI assistance</p>
+      {/* Main */}
+      <main style={{ maxWidth:'1100px', margin:'0 auto', padding:'2.5rem 1.5rem' }}>
+
+        {/* Header */}
+        <div style={{ marginBottom:'2rem' }}>
+          <h1 style={{ fontSize:'1.75rem', fontWeight:'700', color:'#0f172a', margin:'0 0 0.35rem' }}>
+            {greeting}, {user?.name?.split(' ')[0]} 👋
+          </h1>
+          <p style={{ color:'#64748b', margin:0, fontSize:'0.95rem' }}>
+            {courses.length > 0
+              ? `You are enrolled in ${courses.length} course${courses.length > 1 ? 's' : ''}. Start studying below.`
+              : 'No courses enrolled yet. Contact your admin to get started.'}
+          </p>
         </div>
 
-        <div style={S.grid}>
-          {loading ? (
-            [1, 2, 3, 4].map((i) => <div key={i} style={S.skeleton} />)
-          ) : courses.length === 0 ? (
-            <div style={S.emptyState}>
-              <div style={S.emptyIcon}>🎓</div>
-              <p style={S.emptyTitle}>No courses yet</p>
-              <p style={S.emptyDesc}>Contact your educator to get enrolled in a course</p>
-            </div>
-          ) : (
-            courses.map((course, i) => {
-              const isHovered = hoveredId === course.id;
+        {/* Course Grid */}
+        {loading ? (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:'1.25rem' }}>
+            {[1,2,3].map(i => (
+              <div key={i} style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.5rem', height:'160px' }} />
+            ))}
+          </div>
+        ) : courses.length === 0 ? (
+          <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'4rem', textAlign:'center' }}>
+            <div style={{ fontSize:'3rem', marginBottom:'1rem' }}>📭</div>
+            <h3 style={{ color:'#374151', fontWeight:'600', margin:'0 0 0.5rem' }}>No courses yet</h3>
+            <p style={{ color:'#9ca3af', margin:0 }}>Ask your admin to enroll you in a course.</p>
+          </div>
+        ) : (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))', gap:'1.25rem' }}>
+            {courses.map((enrollment, index) => {
+              const course = enrollment.course || enrollment;
+              const color  = COLORS[index % COLORS.length];
               return (
-                <div
+                <button
                   key={course.id}
                   onClick={() => navigate(`/chat/${course.id}`)}
-                  onMouseEnter={() => setHoveredId(course.id)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  style={{ ...S.card, ...(isHovered ? S.cardHoverStyle : {}) }}
+                  style={{
+                    background: color.bg,
+                    border: `1px solid ${color.border}`,
+                    borderRadius:'16px', padding:'1.5rem',
+                    textAlign:'left', cursor:'pointer',
+                    transition:'all 0.2s', width:'100%',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.transform='translateY(-2px)'; e.currentTarget.style.boxShadow='0 8px 25px rgba(0,0,0,0.1)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.boxShadow='none'; }}
                 >
-                  <div style={{ ...S.cardAccent, opacity: isHovered ? 1 : 0 }} />
-                  <div style={S.cardTop}>
-                    <div style={S.iconWrap}>{icons[i % icons.length]}</div>
-                    <span style={S.subjectBadge}>{course.subject}</span>
-                  </div>
-                  <h3 style={S.courseName}>{course.name}</h3>
-                  <p style={S.courseDesc}>{course.description}</p>
-                  <div style={S.cardFooter}>
-                    <span>Open Chat</span>
-                    <span style={{ transition: 'transform 0.2s', transform: isHovered ? 'translateX(3px)' : 'none' }}>→</span>
-                  </div>
-                </div>
+                  <div style={{ width:'44px', height:'44px', background: color.icon, borderRadius:'12px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'20px', marginBottom:'1rem' }}>📖</div>
+                  <h3 style={{ fontWeight:'700', color:'#0f172a', margin:'0 0 0.35rem', fontSize:'1rem' }}>{course.name}</h3>
+                  <p style={{ color:'#64748b', margin:'0 0 1rem', fontSize:'0.85rem' }}>{course.subject || 'Start chatting with AI tutor'}</p>
+                  <span style={{ color: color.text, fontSize:'0.8rem', fontWeight:'600' }}>Open chat →</span>
+                </button>
               );
-            })
-          )}
+            })}
+          </div>
+        )}
+
+        {/* Info */}
+        <div style={{ marginTop:'2rem', background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.25rem 1.5rem', display:'flex', alignItems:'center', gap:'1rem' }}>
+          <div style={{ width:'40px', height:'40px', background:'#eff6ff', borderRadius:'10px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'20px', flexShrink:0 }}>🛡️</div>
+          <div>
+            <p style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 0.15rem', fontSize:'0.9rem' }}>AI answers from your lecture notes only</p>
+            <p style={{ color:'#64748b', margin:0, fontSize:'0.8rem' }}>The AI tutor is trained exclusively on your uploaded course materials — not the internet.</p>
+          </div>
         </div>
       </main>
     </div>
