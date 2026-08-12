@@ -1,26 +1,16 @@
 // ============================================================
 // chat.js — Chat Routes for AI Study Assistant
 // ============================================================
-// Routes:
-//   GET  /api/chat/test
-//   GET  /api/chat/course-id-helper
-//   GET  /api/chat/check-chunks
-//   POST /api/chat/message
-//   POST /api/chat/message/stream
-//   GET  /api/chat/history
-//   GET  /api/chat/sessions
-//   GET  /api/chat/search
-// ============================================================
-
+ 
 const express = require('express');
 const router  = express.Router();
 const prisma  = require('../prismaClient');
-
+ 
 const { authenticateToken } = require('../middleware/auth');
 const { checkEnrollment }   = require('../middleware/checkEnrollment');
 const { chat, chatStream }  = require('../services/openaiService');
 const { searchMaterials }   = require('../services/ragService');
-
+ 
 // ============================================================
 // GUARDRAIL 1 — Input Safety
 // ============================================================
@@ -38,41 +28,25 @@ const checkInputSafety = (question) => {
     /what are your instructions/i,
     /show me your (prompt|system|rules)/i,
   ];
-
   for (const pattern of injectionPatterns) {
     if (pattern.test(question)) {
-      return {
-        safe: false,
-        reason: 'This type of request is beyond the scope of this course. Please ask a question related to your course content.'
-      };
+      return { safe: false, reason: 'This type of request is beyond the scope of this course. Please ask a question related to your course content.' };
     }
   }
-
   const inappropriatePatterns = [
     /\b(hack|exploit|weapon|bomb|kill|violence)\b/i,
     /\b(porn|sex|nude|explicit)\b/i,
   ];
-
   for (const pattern of inappropriatePatterns) {
     if (pattern.test(question)) {
-      return {
-        safe: false,
-        reason: 'This topic is beyond the scope of this course. Please ask academic questions related to your course.'
-      };
+      return { safe: false, reason: 'This topic is beyond the scope of this course. Please ask academic questions related to your course.' };
     }
   }
-
-  if (question.trim().length < 3) {
-    return { safe: false, reason: 'Please ask a complete question about your course content.' };
-  }
-
-  if (question.length > 1000) {
-    return { safe: false, reason: 'Your question is too long. Please keep it under 1000 characters.' };
-  }
-
+  if (question.trim().length < 3) return { safe: false, reason: 'Please ask a complete question about your course content.' };
+  if (question.length > 1000)    return { safe: false, reason: 'Your question is too long. Please keep it under 1000 characters.' };
   return { safe: true };
 };
-
+ 
 // ============================================================
 // GUARDRAIL 2 — Scope Check
 // ============================================================
@@ -86,19 +60,14 @@ const checkScope = (question) => {
     /can you (cook|make) (food|recipe)/i,
     /translate (this|to)/i,
   ];
-
   for (const pattern of offTopicPatterns) {
     if (pattern.test(question)) {
-      return {
-        inScope: false,
-        reason: 'This topic is beyond the scope of this course. Please refer to your lecturer for further guidance.'
-      };
+      return { inScope: false, reason: 'This topic is beyond the scope of this course. Please refer to your lecturer for further guidance.' };
     }
   }
-
   return { inScope: true };
 };
-
+ 
 // ============================================================
 // GUARDRAIL 3 — Output Safety
 // ============================================================
@@ -112,25 +81,20 @@ const checkOutputSafety = (answer) => {
     /according to rule/i,
     /my instructions say/i,
   ];
-
   for (const pattern of leakPatterns) {
     if (pattern.test(answer)) {
-      return {
-        safe: false,
-        cleanAnswer: 'This topic is beyond the scope of this course. Please refer to your lecturer for further guidance.'
-      };
+      return { safe: false, cleanAnswer: 'This topic is beyond the scope of this course. Please refer to your lecturer for further guidance.' };
     }
   }
-
   return { safe: true, cleanAnswer: answer };
 };
-
+ 
 // ============================================================
 // HELPER — Build system prompt
 // ============================================================
 const buildSystemPrompt = (courseName, context, hintMode) => {
   const textSection = context.length > 0 ? context : 'NO MATERIALS FOUND.';
-
+ 
   if (hintMode) {
     return `You are a study tutor for "${courseName}".
 Use ONLY the TEXT below to give a short guiding hint.
@@ -141,11 +105,11 @@ Do not ask follow up questions.
 Write in plain sentences only.
 If the topic is not in the TEXT below, say only:
 "This topic is beyond the scope of this course. Please refer to your lecturer for further guidance."
-
+ 
 TEXT:
 ${textSection}`;
   }
-
+ 
   return `You are a study tutor for "${courseName}".
 Answer using ONLY the information in the TEXT below.
 Write your answer ONCE — never repeat any sentence or bullet point.
@@ -158,11 +122,11 @@ Do not add closing sentences like "Would you like to know more".
 Stop after listing all relevant points from the TEXT.
 If the topic is not in the TEXT below, say only:
 "This topic is beyond the scope of this course. Please refer to your lecturer for further guidance."
-
+ 
 TEXT:
 ${textSection}`;
 };
-
+ 
 // ============================================================
 // TEST — GET /api/chat/test
 // ============================================================
@@ -177,21 +141,19 @@ router.get('/test', async (req, res) => {
     res.status(500).json({ error: 'OpenAI not working', details: err.message });
   }
 });
-
+ 
 // ============================================================
 // COURSE ID HELPER — GET /api/chat/course-id-helper
 // ============================================================
 router.get('/course-id-helper', async (req, res) => {
   try {
-    const courses = await prisma.course.findMany({
-      select: { id: true, name: true }
-    });
+    const courses = await prisma.course.findMany({ select: { id: true, name: true } });
     res.json(courses);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // ============================================================
 // CHECK CHUNKS — GET /api/chat/check-chunks?courseId=xxx
 // ============================================================
@@ -210,43 +172,32 @@ router.get('/check-chunks', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 // ============================================================
-// MAIN CHAT — POST /api/chat/message
+// MAIN CHAT — POST /api/chat/message (non-streaming)
 // ============================================================
 router.post('/message', authenticateToken, checkEnrollment, async (req, res) => {
-  const { question, courseId, hintMode } = req.body;
-
-  if (!question || !courseId) {
-    return res.status(400).json({ error: 'question and courseId are required' });
-  }
-
-  // Guardrail 1
+  const { question, courseId, hintMode, sessionId: existingSessionId } = req.body;
+ 
+  if (!question || !courseId) return res.status(400).json({ error: 'question and courseId are required' });
+ 
   const safetyCheck = checkInputSafety(question);
-  if (!safetyCheck.safe) {
-    return res.json({ answer: safetyCheck.reason, sources: [], guardrail: 'input_safety' });
-  }
-
-  // Guardrail 2
+  if (!safetyCheck.safe) return res.json({ answer: safetyCheck.reason, sources: [], guardrail: 'input_safety' });
+ 
   const scopeCheck = checkScope(question);
-  if (!scopeCheck.inScope) {
-    return res.json({ answer: scopeCheck.reason, sources: [], guardrail: 'scope' });
-  }
-
+  if (!scopeCheck.inScope) return res.json({ answer: scopeCheck.reason, sources: [], guardrail: 'scope' });
+ 
   const course = await prisma.course.findUnique({ where: { id: courseId } });
   if (!course) return res.status(404).json({ error: 'Course not found' });
-
-  // Expand query for scope questions
+ 
   const scopeKeywords = ['scope', 'learn', 'objective', 'outcome', 'module', 'topic', 'cover', 'should', 'measuring', 'control'];
   const isScopeQuestion = scopeKeywords.some(k => question.toLowerCase().includes(k));
   const searchQuery = isScopeQuestion ? question + ' scope objectives outcomes session controls' : question;
-
-  // RAG search
+ 
   const relevantChunks = await searchMaterials(searchQuery, courseId);
-
   let context = '';
   let sources = [];
-
+ 
   if (relevantChunks.length > 0) {
     const topChunks = relevantChunks.slice(0, 3);
     context = '\n\nRelevant course materials:\n' +
@@ -255,42 +206,34 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
       ).join('\n\n');
     sources = [...new Set(topChunks.map(c => c.metadata.materialTitle))];
   }
-
+ 
   const systemPrompt = buildSystemPrompt(course.name, context, hintMode);
-
-  // Get or create session
-  let session = await prisma.chatSession.findFirst({
-    where: { userId: req.user.id, courseId }
-  });
-
-  if (!session) {
-    session = await prisma.chatSession.create({
-      data: { userId: req.user.id, courseId }
-    });
+ 
+  // Use existing session or create new one
+  let session = null;
+  if (existingSessionId) {
+    session = await prisma.chatSession.findUnique({ where: { id: existingSessionId } });
   }
-
-  // Save user message
-  await prisma.message.create({
-    data: { sessionId: session.id, role: 'user', content: question }
-  });
-
-  // Get recent messages for context
+  if (!session) {
+    session = await prisma.chatSession.findFirst({ where: { userId: req.user.id, courseId } });
+  }
+  if (!session) {
+    session = await prisma.chatSession.create({ data: { userId: req.user.id, courseId } });
+  }
+ 
+  await prisma.message.create({ data: { sessionId: session.id, role: 'user', content: question } });
+ 
   const recentMessages = await prisma.message.findMany({
     where: { sessionId: session.id },
     orderBy: { createdAt: 'desc' },
     take: 6
   });
-
   const messages = recentMessages.reverse().map(m => ({ role: m.role, content: m.content }));
-
-  // Call OpenAI
-  const rawAnswer = await chat(messages, systemPrompt);
-
-  // Guardrail 3
+ 
+  const rawAnswer   = await chat(messages, systemPrompt);
   const outputCheck = checkOutputSafety(rawAnswer);
   const finalAnswer = outputCheck.cleanAnswer;
-
-  // Save AI response
+ 
   const savedMessage = await prisma.message.create({
     data: {
       sessionId: session.id,
@@ -299,31 +242,25 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
       sources:   sources.length > 0 ? sources : null
     }
   });
-
-  res.json({
-    answer:    finalAnswer,
-    sources,
-    messageId: savedMessage.id,
-    sessionId: session.id
-  });
+ 
+  res.json({ answer: finalAnswer, sources, messageId: savedMessage.id, sessionId: session.id });
 });
-
+ 
 // ============================================================
 // STREAMING CHAT — POST /api/chat/message/stream
 // ============================================================
 router.post('/message/stream', authenticateToken, checkEnrollment, async (req, res) => {
-  const { question, courseId, hintMode } = req.body;
-
-  if (!question || !courseId) {
-    return res.status(400).json({ error: 'question and courseId required' });
-  }
-
+  // ── KEY CHANGE: also read sessionId from frontend ─────────
+  const { question, courseId, hintMode, sessionId: existingSessionId } = req.body;
+ 
+  if (!question || !courseId) return res.status(400).json({ error: 'question and courseId required' });
+ 
   // SSE headers
   res.setHeader('Content-Type',  'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection',    'keep-alive');
   res.flushHeaders();
-
+ 
   // Guardrail 1
   const safetyCheck = checkInputSafety(question);
   if (!safetyCheck.safe) {
@@ -331,7 +268,7 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
     res.end();
     return;
   }
-
+ 
   // Guardrail 2
   const scopeCheck = checkScope(question);
   if (!scopeCheck.inScope) {
@@ -339,25 +276,24 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
     res.end();
     return;
   }
-
+ 
   const course = await prisma.course.findUnique({ where: { id: courseId } });
   if (!course) {
     res.write(`data: ${JSON.stringify({ error: 'Course not found' })}\n\n`);
     res.end();
     return;
   }
-
+ 
   // Expand query
   const scopeKeywords = ['scope', 'learn', 'objective', 'outcome', 'module', 'topic', 'cover', 'should', 'measuring', 'control'];
   const isScopeQuestion = scopeKeywords.some(k => question.toLowerCase().includes(k));
   const searchQuery = isScopeQuestion ? question + ' scope objectives outcomes session controls' : question;
-
+ 
   // RAG search
   const relevantChunks = await searchMaterials(searchQuery, courseId);
-
   let context = '';
   let sources = [];
-
+ 
   if (relevantChunks.length > 0) {
     const topChunks = relevantChunks.slice(0, 3);
     context = '\n\nRelevant course materials:\n' +
@@ -366,49 +302,69 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
       ).join('\n\n');
     sources = [...new Set(topChunks.map(c => c.metadata.materialTitle))];
   }
-
+ 
   const systemPrompt = buildSystemPrompt(course.name, context, hintMode);
-
-  // Get or create session
-  let session = await prisma.chatSession.findFirst({
-    where: { userId: req.user.id, courseId }
-  });
-
+ 
+  // ── Session logic: use existing or create new ─────────────
+  // If frontend sends sessionId → use that session (continuing chat)
+  // If frontend sends null/undefined → create NEW session (new chat)
+  let session = null;
+ 
+  if (existingSessionId) {
+    // Continue existing session
+    session = await prisma.chatSession.findUnique({
+      where: { id: existingSessionId }
+    });
+  }
+ 
   if (!session) {
+    // Create a brand new session (New Chat clicked)
     session = await prisma.chatSession.create({
       data: { userId: req.user.id, courseId }
     });
   }
-
+ 
   // Save user message
   await prisma.message.create({
     data: { sessionId: session.id, role: 'user', content: question }
   });
-
-  // Get recent messages
+ 
+  // Get recent messages for AI context
   const recentMessages = await prisma.message.findMany({
     where: { sessionId: session.id },
     orderBy: { createdAt: 'desc' },
     take: 6
   });
-
   const messages = recentMessages.reverse().map(m => ({ role: m.role, content: m.content }));
-
-  // Send sources before streaming starts
+ 
+  // Send sources + sessionId to frontend before streaming
   res.write(`data: ${JSON.stringify({ sources, sessionId: session.id })}\n\n`);
-
-  // Stream answer word by word
-  await chatStream(messages, systemPrompt, res);
+ 
+  // Stream answer AND save to database when done
+  await chatStream(messages, systemPrompt, res, async (fullAnswer) => {
+    // Save complete AI answer to database
+    const savedMessage = await prisma.message.create({
+      data: {
+        sessionId: session.id,
+        role:      'assistant',
+        content:   fullAnswer,
+        sources:   sources.length > 0 ? sources : null,
+      }
+    });
+ 
+    // Send messageId to frontend so feedback/bookmark buttons appear
+    res.write(`data: ${JSON.stringify({ done: true, messageId: savedMessage.id })}\n\n`);
+    res.end();
+  });
 });
-
+ 
 // ============================================================
 // CHAT HISTORY — GET /api/chat/history
 // ============================================================
 router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId, sessionId } = req.query;
-
   let session;
-
+ 
   if (sessionId) {
     session = await prisma.chatSession.findUnique({
       where: { id: sessionId },
@@ -417,54 +373,44 @@ router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   } else {
     session = await prisma.chatSession.findFirst({
       where: { userId: req.user.id, courseId },
-      include: { messages: { orderBy: { createdAt: 'asc' } } }
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+      orderBy: { createdAt: 'desc' }
     });
   }
-
-  if (!session) return res.json({ messages: [] });
-
+ 
+  if (!session) return res.json({ messages: [], sessionId: null });
   res.json({ messages: session.messages, sessionId: session.id });
 });
-
+ 
 // ============================================================
 // CHAT SESSIONS — GET /api/chat/sessions
 // ============================================================
 router.get('/sessions', authenticateToken, async (req, res) => {
   const { courseId } = req.query;
-
   const sessions = await prisma.chatSession.findMany({
     where: { userId: req.user.id, courseId },
-    include: {
-      messages: { take: 1, orderBy: { createdAt: 'asc' } }
-    },
+    include: { messages: { take: 1, orderBy: { createdAt: 'asc' } } },
     orderBy: { createdAt: 'desc' }
   });
-
   res.json(sessions);
 });
-
+ 
 // ============================================================
-// SEARCH PAST CHATS — GET /api/chat/search?q=query&courseId=xxx
+// SEARCH PAST CHATS — GET /api/chat/search
 // ============================================================
 router.get('/search', authenticateToken, async (req, res) => {
   const { q, courseId } = req.query;
-
   if (!q) return res.json({ results: [] });
-
   const messages = await prisma.message.findMany({
     where: {
       content: { contains: q, mode: 'insensitive' },
-      session: {
-        userId:   req.user.id,
-        courseId: courseId || undefined
-      }
+      session: { userId: req.user.id, courseId: courseId || undefined }
     },
     include: { session: true },
     orderBy: { createdAt: 'desc' },
     take: 20
   });
-
   res.json({ results: messages });
 });
-
+ 
 module.exports = router;
