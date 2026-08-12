@@ -4,6 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import ReactMarkdown from 'react-markdown';
 
+// ── Helper: parse sources from DB (stored as JSON) ───────────
+const parseSources = (sources) => {
+  if (!sources) return [];
+  if (Array.isArray(sources)) return sources;
+  try { return JSON.parse(sources); } catch { return []; }
+};
+
 export default function Chat() {
   const { courseId } = useParams();
   const { user, logout } = useAuth();
@@ -24,7 +31,7 @@ export default function Chat() {
   const bottomRef   = useRef(null);
   const textareaRef = useRef(null);
 
-  // ── Load course + sessions + latest history ───────────────────────────────
+  // ── Load course + sessions + latest history ───────────────
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -57,12 +64,12 @@ export default function Chat() {
     loadData();
   }, [courseId]);
 
-  // ── Auto scroll to bottom ─────────────────────────────────────────────────
+  // ── Auto scroll ───────────────────────────────────────────
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── Auto resize textarea ──────────────────────────────────────────────────
+  // ── Auto resize textarea ──────────────────────────────────
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -70,7 +77,7 @@ export default function Chat() {
     }
   }, [input]);
 
-  // ── Feedback (thumbs up/down) ─────────────────────────────────────────────
+  // ── Feedback ──────────────────────────────────────────────
   const submitFeedback = async (messageId, rating) => {
     try {
       await api.post('/feedback', { messageId, rating });
@@ -80,7 +87,7 @@ export default function Chat() {
     }
   };
 
-  // ── Bookmark toggle ───────────────────────────────────────────────────────
+  // ── Bookmark ──────────────────────────────────────────────
   const toggleBookmark = async (messageId) => {
     try {
       const res = await api.post('/bookmarks', { messageId, courseId });
@@ -90,7 +97,7 @@ export default function Chat() {
     }
   };
 
-  // ── Send message with streaming ───────────────────────────────────────────
+  // ── Send message with streaming ───────────────────────────
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
     const question = input.trim();
@@ -98,13 +105,15 @@ export default function Chat() {
     setError('');
     setLoading(true);
 
+    // Add user message immediately
     setMessages(prev => [...prev, {
       role: 'user', content: question, createdAt: new Date().toISOString(),
     }]);
 
+    // Add empty AI placeholder
     setMessages(prev => [...prev, {
       role: 'assistant', content: '', sources: [], streaming: true,
-      createdAt: new Date().toISOString(),
+      id: null, createdAt: new Date().toISOString(),
     }]);
 
     try {
@@ -119,7 +128,12 @@ export default function Chat() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ question, courseId, hintMode, sessionId: currentSessionId })
+        body: JSON.stringify({
+          question,
+          courseId,
+          hintMode,
+          sessionId: currentSessionId, // null = new chat, value = continue
+        })
       });
 
       const reader  = response.body.getReader();
@@ -130,45 +144,61 @@ export default function Chat() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
         const lines = decoder.decode(value).split('\n');
+
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.sources) sources = data.sources;
+
+            // Sources + sessionId received before streaming starts
+            if (data.sources !== undefined) sources = data.sources;
+            if (data.sessionId && !currentSessionId) {
+              setCurrentSessionId(data.sessionId);
+            }
+
+            // Each word token
             if (data.token) {
               fullAnswer += data.token;
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = {
                   role: 'assistant', content: fullAnswer,
-                  sources, streaming: true, createdAt: new Date().toISOString(),
+                  sources, streaming: true, id: null,
+                  createdAt: new Date().toISOString(),
                 };
                 return updated;
               });
             }
-            if (data.done) {
-  setMessages(prev => {
-    const updated = [...prev];
-    updated[updated.length - 1] = {
-      role:      'assistant',
-      content:   fullAnswer,
-      sources,
-      streaming: false,
-      id:        data.messageId,  // ← THIS is critical
-      createdAt: new Date().toISOString(),
-    };
-    return updated;
-  });
 
-  // Refresh sidebar sessions list
-  const sessRes = await api.get(`/chat/sessions?courseId=${courseId}`);
-  setSessions(sessRes.data);
-  if (!currentSessionId && sessRes.data.length > 0) {
-    setCurrentSessionId(sessRes.data[0].id);
-  }
-}
-          } catch (e) { /* skip malformed */ }
+            // Streaming complete
+            if (data.done) {
+              const messageId = data.messageId || null;
+              const sessionId = data.sessionId || currentSessionId;
+
+              // Always update sessionId from backend
+              if (sessionId) setCurrentSessionId(sessionId);
+
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  role:      'assistant',
+                  content:   fullAnswer,
+                  sources,
+                  streaming: false,
+                  id:        messageId, // ← enables feedback + bookmark
+                  createdAt: new Date().toISOString(),
+                };
+                return updated;
+              });
+
+              // Refresh sessions sidebar
+              const sessRes = await api.get(`/chat/sessions?courseId=${courseId}`);
+              setSessions(sessRes.data);
+            }
+
+          } catch (e) { /* skip malformed lines */ }
         }
       }
     } catch (err) {
@@ -176,8 +206,10 @@ export default function Chat() {
       setMessages(prev => {
         const updated = [...prev];
         updated[updated.length - 1] = {
-          role: 'assistant', content: 'Something went wrong. Please try again.',
-          sources: [], streaming: false, createdAt: new Date().toISOString(),
+          role: 'assistant',
+          content: 'Something went wrong. Please try again.',
+          sources: [], streaming: false, id: null,
+          createdAt: new Date().toISOString(),
         };
         return updated;
       });
@@ -187,30 +219,30 @@ export default function Chat() {
     }
   };
 
-  // ── Load past session ─────────────────────────────────────────────────────
+  // ── Load past session ─────────────────────────────────────
   const loadSession = async (session) => {
-  setCurrentSessionId(session.id);
-  setError('');
-  setSessionLoading(true);
-  try {
-    // Pass sessionId so backend loads the right session
-    const res = await api.get(`/chat/history?courseId=${courseId}&sessionId=${session.id}`);
-    if (res.data.messages?.length > 0) {
-      setMessages(res.data.messages);
-    } else {
+    setCurrentSessionId(session.id);
+    setError('');
+    setSessionLoading(true);
+    try {
+      const res = await api.get(`/chat/history?courseId=${courseId}&sessionId=${session.id}`);
+      if (res.data.messages?.length > 0) {
+        setMessages(res.data.messages);
+      } else {
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error('Load session error:', err);
       setMessages([]);
+    } finally {
+      setSessionLoading(false);
     }
-  } catch (err) {
-    console.error('Load session error:', err);
-    setMessages([]);
-  } finally {
-    setSessionLoading(false);
-  }
-};
+  };
 
+  // ── New Chat ──────────────────────────────────────────────
   const startNewChat = () => {
     setMessages([]);
-    setCurrentSessionId(null);
+    setCurrentSessionId(null); // null → backend creates new session
     setInput('');
     setError('');
   };
@@ -226,7 +258,6 @@ export default function Chat() {
     'Give me a summary',
   ];
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div style={{ height:'100vh', display:'flex', flexDirection:'column', background:'#f8fafc', fontFamily:'system-ui,sans-serif', overflow:'hidden' }}>
       <style>{`
@@ -235,9 +266,7 @@ export default function Chat() {
         .msg-ai   { background:#fff; border:1px solid #e2e8f0; border-radius:18px 18px 18px 4px; }
         .msg-user { background:linear-gradient(135deg,#6366f1,#8b5cf6); border-radius:18px 18px 4px 18px; }
         .session-item:hover { background:#f1f5f9 !important; }
-        .chip:hover  { border-color:#6366f1 !important; color:#6366f1 !important; background:#eff6ff !important; }
-        .send-btn:hover { opacity:0.9 !important; }
-        .action-btn:hover { opacity:0.85 !important; }
+        .chip:hover { border-color:#6366f1 !important; color:#6366f1 !important; background:#eff6ff !important; }
         .ai-content p  { margin:0.2rem 0; line-height:1.65; }
         .ai-content ul { margin:0.2rem 0; padding-left:1.2rem; }
         .ai-content li { margin:0.1rem 0; line-height:1.65; }
@@ -246,11 +275,9 @@ export default function Chat() {
         textarea { font-family:system-ui,sans-serif !important; }
       `}</style>
 
-      {/* ── NAVBAR ────────────────────────────────────────────────────────── */}
+      {/* NAVBAR */}
       <nav style={{ background:'#fff', borderBottom:'1px solid #e2e8f0', padding:'0 1rem', flexShrink:0, zIndex:100, boxShadow:'0 1px 3px rgba(0,0,0,0.06)' }}>
         <div style={{ height:'56px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-
-          {/* Left */}
           <div style={{ display:'flex', alignItems:'center', gap:'0.625rem' }}>
             <button onClick={() => setShowSidebar(v => !v)} style={{ background:'#f1f5f9', border:'none', borderRadius:'8px', width:'32px', height:'32px', cursor:'pointer', fontSize:'16px', display:'flex', alignItems:'center', justifyContent:'center' }}>☰</button>
             <button onClick={() => navigate('/dashboard')} style={{ background:'none', border:'none', color:'#64748b', fontSize:'0.8rem', cursor:'pointer' }}>← Back</button>
@@ -260,24 +287,11 @@ export default function Chat() {
               <span style={{ fontWeight:'700', fontSize:'0.95rem', color:'#0f172a' }}>{courseName || 'Loading...'}</span>
             </div>
           </div>
-
-          {/* Right */}
-          <div style={{ display:'flex', alignItems:'center', gap:'0.625rem' }}>
-
-            {/* Feature buttons */}
-            <button onClick={() => navigate(`/quiz/${courseId}`)} className="action-btn" style={{ background:'#f5f3ff', border:'1px solid #ddd6fe', color:'#7c3aed', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>
-              🧠 Quiz
-            </button>
-            <button onClick={() => navigate(`/flashcards/${courseId}`)} className="action-btn" style={{ background:'#ecfdf5', border:'1px solid #a7f3d0', color:'#059669', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>
-              🃏 Flashcards
-            </button>
-            <button onClick={() => navigate('/bookmarks')} className="action-btn" style={{ background:'#fefce8', border:'1px solid #fde68a', color:'#d97706', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>
-              🔖 Saved
-            </button>
-
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+            <button onClick={() => navigate(`/quiz/${courseId}`)} style={{ background:'#f5f3ff', border:'1px solid #ddd6fe', color:'#7c3aed', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>🧠 Quiz</button>
+            <button onClick={() => navigate(`/flashcards/${courseId}`)} style={{ background:'#ecfdf5', border:'1px solid #a7f3d0', color:'#059669', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>🃏 Flashcards</button>
+            <button onClick={() => navigate('/bookmarks')} style={{ background:'#fefce8', border:'1px solid #fde68a', color:'#d97706', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>🔖 Saved</button>
             <div style={{ width:'1px', height:'20px', background:'#e2e8f0' }} />
-
-            {/* Hint Mode */}
             <div style={{ display:'flex', alignItems:'center', gap:'0.4rem' }}>
               <span style={{ fontSize:'0.78rem', color:'#64748b' }}>Hint</span>
               <button onClick={() => setHintMode(v => !v)} style={{ width:'38px', height:'21px', borderRadius:'11px', border:'none', cursor:'pointer', background: hintMode ? 'linear-gradient(135deg,#6366f1,#8b5cf6)' : '#e2e8f0', position:'relative', transition:'background 0.2s' }}>
@@ -285,22 +299,17 @@ export default function Chat() {
               </button>
               {hintMode && <span style={{ background:'#fef3c7', color:'#92400e', fontSize:'0.68rem', fontWeight:'600', padding:'0.15rem 0.45rem', borderRadius:'20px' }}>ON</span>}
             </div>
-
             <div style={{ width:'1px', height:'20px', background:'#e2e8f0' }} />
-
-            {/* User */}
             <div style={{ width:'28px', height:'28px', background:'#eff6ff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', fontSize:'12px', color:'#6366f1' }}>
               {user?.name?.charAt(0).toUpperCase()}
             </div>
             <span style={{ fontSize:'0.82rem', color:'#475569' }}>{user?.name}</span>
-            <button onClick={logout} style={{ background:'#fef2f2', border:'1px solid #fecaca', color:'#dc2626', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>
-              Sign out
-            </button>
+            <button onClick={logout} style={{ background:'#fef2f2', border:'1px solid #fecaca', color:'#dc2626', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>Sign out</button>
           </div>
         </div>
       </nav>
 
-      {/* ── BODY ─────────────────────────────────────────────────────────── */}
+      {/* BODY */}
       <div style={{ display:'flex', flex:1, overflow:'hidden', minHeight:0 }}>
 
         {/* SIDEBAR */}
@@ -325,7 +334,7 @@ export default function Chat() {
                   style={{ width:'100%', textAlign:'left', padding:'0.6rem 0.75rem', borderRadius:'10px', border: currentSessionId===session.id ? '1px solid #bfdbfe' : '1px solid transparent', cursor:'pointer', marginBottom:'0.2rem', background: currentSessionId===session.id ? '#eff6ff' : 'none', transition:'all 0.15s' }}
                 >
                   <div style={{ fontSize:'0.8rem', fontWeight:'600', color: currentSessionId===session.id ? '#3b82f6' : '#374151', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginBottom:'0.15rem' }}>
-                    {session.messages?.[0]?.content?.substring(0,28) || 'New chat'}...
+                    {session.messages?.[0]?.content?.substring(0, 28) || 'New chat'}
                   </div>
                   <div style={{ fontSize:'0.7rem', color:'#94a3b8' }}>
                     {new Date(session.createdAt).toLocaleDateString()}
@@ -339,7 +348,7 @@ export default function Chat() {
         {/* MAIN CHAT */}
         <main style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
 
-          {/* Messages */}
+          {/* Messages scroll area */}
           <div style={{ flex:1, overflowY:'auto', padding:'1.5rem 1.5rem 1rem' }}>
             <div style={{ maxWidth:'780px', margin:'0 auto', display:'flex', flexDirection:'column', gap:'1.25rem' }}>
 
@@ -349,6 +358,7 @@ export default function Chat() {
                   <div style={{ display:'flex', gap:'0.375rem', alignItems:'center', justifyContent:'center' }}>
                     {[0,150,300].map(d => <div key={d} style={{ width:'6px', height:'6px', borderRadius:'50%', background:'#6366f1', animation:'bounce 1.2s infinite', animationDelay:`${d}ms` }} />)}
                   </div>
+                  <p style={{ color:'#94a3b8', fontSize:'0.85rem', marginTop:'0.75rem' }}>Loading chat history...</p>
                 </div>
               )}
 
@@ -362,15 +372,13 @@ export default function Chat() {
                   </p>
                   <div style={{ display:'flex', flexWrap:'wrap', gap:'0.5rem', justifyContent:'center' }}>
                     {suggestions.map(s => (
-                      <button key={s} className="chip" onClick={() => setInput(s)} style={{ background:'#fff', border:'1px solid #e2e8f0', color:'#475569', padding:'0.45rem 0.9rem', borderRadius:'20px', fontSize:'0.8rem', cursor:'pointer', transition:'all 0.15s' }}>
-                        {s}
-                      </button>
+                      <button key={s} className="chip" onClick={() => setInput(s)} style={{ background:'#fff', border:'1px solid #e2e8f0', color:'#475569', padding:'0.45rem 0.9rem', borderRadius:'20px', fontSize:'0.8rem', cursor:'pointer', transition:'all 0.15s' }}>{s}</button>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* ── MESSAGES ─────────────────────────────────────────────── */}
+              {/* MESSAGES */}
               {!sessionLoading && messages.map((msg, i) => (
                 <div key={i} style={{ display:'flex', justifyContent: msg.role==='user' ? 'flex-end' : 'flex-start' }}>
 
@@ -387,7 +395,6 @@ export default function Chat() {
                         <p style={{ margin:0, color:'#fff', whiteSpace:'pre-wrap' }}>{msg.content}</p>
                       ) : (
                         <div className="ai-content" style={{ color:'#0f172a' }}>
-                          {/* ── AI CONTENT — rendered ONCE only ── */}
                           <ReactMarkdown>{msg.content}</ReactMarkdown>
                           {msg.streaming && (
                             <span style={{ display:'inline-block', width:'8px', height:'15px', background:'#6366f1', marginLeft:'2px', verticalAlign:'middle', animation:'blink 1s infinite', borderRadius:'2px' }} />
@@ -396,62 +403,37 @@ export default function Chat() {
                       )}
                     </div>
 
-                    {/* Sources panel */}
-                    {msg.role==='assistant' && msg.sources?.length > 0 && (
+                    {/* Sources — uses parseSources() to handle DB JSON format */}
+                    {msg.role==='assistant' && parseSources(msg.sources).length > 0 && (
                       <div style={{ marginTop:'0.5rem', padding:'0.5rem 0.75rem', background:'#fefce8', border:'1px solid #fde68a', borderRadius:'10px', display:'flex', alignItems:'flex-start', gap:'0.5rem' }}>
-                        <span style={{ fontSize:'0.75rem' }}>📚</span>
+                        <span>📚</span>
                         <div>
                           <p style={{ fontSize:'0.7rem', fontWeight:'600', color:'#92400e', margin:'0 0 0.1rem' }}>Sources Used</p>
-                          {msg.sources.map((src,si) => (
+                          {parseSources(msg.sources).map((src, si) => (
                             <p key={si} style={{ fontSize:'0.75rem', color:'#78350f', margin:'0.05rem 0' }}>• {src}</p>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {/* ── FEEDBACK + BOOKMARK BUTTONS ────────────────────── */}
+                    {/* FEEDBACK + BOOKMARK — only when msg.id exists */}
                     {msg.role==='assistant' && !msg.streaming && msg.id && (
                       <div style={{ display:'flex', alignItems:'center', gap:'0.4rem', marginTop:'0.5rem', paddingLeft:'0.25rem' }}>
-
-                        {/* Thumbs up */}
                         <button
                           onClick={() => submitFeedback(msg.id, 1)}
-                          style={{
-                            background: feedbacks[msg.id]===1 ? '#dcfce7' : '#f1f5f9',
-                            border: `1px solid ${feedbacks[msg.id]===1 ? '#86efac' : '#e2e8f0'}`,
-                            color: feedbacks[msg.id]===1 ? '#16a34a' : '#64748b',
-                            padding:'0.25rem 0.6rem', borderRadius:'8px', fontSize:'0.78rem',
-                            cursor:'pointer', display:'flex', alignItems:'center', gap:'0.25rem', transition:'all 0.15s',
-                          }}
+                          style={{ background: feedbacks[msg.id]===1 ? '#dcfce7' : '#f1f5f9', border:`1px solid ${feedbacks[msg.id]===1 ? '#86efac' : '#e2e8f0'}`, color: feedbacks[msg.id]===1 ? '#16a34a' : '#64748b', padding:'0.25rem 0.6rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', display:'flex', alignItems:'center', gap:'0.25rem', transition:'all 0.15s' }}
                         >
                           👍 {feedbacks[msg.id]===1 ? 'Helpful' : ''}
                         </button>
-
-                        {/* Thumbs down */}
                         <button
                           onClick={() => submitFeedback(msg.id, -1)}
-                          style={{
-                            background: feedbacks[msg.id]===-1 ? '#fef2f2' : '#f1f5f9',
-                            border: `1px solid ${feedbacks[msg.id]===-1 ? '#fca5a5' : '#e2e8f0'}`,
-                            color: feedbacks[msg.id]===-1 ? '#dc2626' : '#64748b',
-                            padding:'0.25rem 0.6rem', borderRadius:'8px', fontSize:'0.78rem',
-                            cursor:'pointer', display:'flex', alignItems:'center', gap:'0.25rem', transition:'all 0.15s',
-                          }}
+                          style={{ background: feedbacks[msg.id]===-1 ? '#fef2f2' : '#f1f5f9', border:`1px solid ${feedbacks[msg.id]===-1 ? '#fca5a5' : '#e2e8f0'}`, color: feedbacks[msg.id]===-1 ? '#dc2626' : '#64748b', padding:'0.25rem 0.6rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', display:'flex', alignItems:'center', gap:'0.25rem', transition:'all 0.15s' }}
                         >
                           👎 {feedbacks[msg.id]===-1 ? 'Not helpful' : ''}
                         </button>
-
-                        {/* Bookmark */}
                         <button
                           onClick={() => toggleBookmark(msg.id)}
-                          style={{
-                            background: bookmarks[msg.id] ? '#fefce8' : '#f1f5f9',
-                            border: `1px solid ${bookmarks[msg.id] ? '#fde68a' : '#e2e8f0'}`,
-                            color: bookmarks[msg.id] ? '#d97706' : '#64748b',
-                            padding:'0.25rem 0.6rem', borderRadius:'8px', fontSize:'0.78rem',
-                            cursor:'pointer', display:'flex', alignItems:'center', gap:'0.25rem',
-                            marginLeft:'auto', transition:'all 0.15s',
-                          }}
+                          style={{ background: bookmarks[msg.id] ? '#fefce8' : '#f1f5f9', border:`1px solid ${bookmarks[msg.id] ? '#fde68a' : '#e2e8f0'}`, color: bookmarks[msg.id] ? '#d97706' : '#64748b', padding:'0.25rem 0.6rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', display:'flex', alignItems:'center', gap:'0.25rem', marginLeft:'auto', transition:'all 0.15s' }}
                         >
                           {bookmarks[msg.id] ? '🔖 Saved' : '🔖 Save'}
                         </button>
@@ -460,7 +442,7 @@ export default function Chat() {
 
                     {/* Timestamp */}
                     <p style={{ fontSize:'0.68rem', color:'#94a3b8', margin:'0.25rem 0.25rem 0', textAlign: msg.role==='user' ? 'right' : 'left' }}>
-                      {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([],{ hour:'2-digit', minute:'2-digit' }) : ''}
+                      {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : ''}
                     </p>
                   </div>
 
@@ -505,7 +487,7 @@ export default function Chat() {
             </div>
           )}
 
-          {/* ── INPUT AREA ───────────────────────────────────────────────── */}
+          {/* INPUT */}
           <div style={{ background:'#fff', borderTop:'1px solid #e2e8f0', padding:'1rem 1.5rem 1.25rem' }}>
             <div style={{ maxWidth:'780px', margin:'0 auto' }}>
               <div style={{ display:'flex', alignItems:'flex-end', gap:'0.75rem', background:'#f8fafc', border:'1.5px solid #e2e8f0', borderRadius:'16px', padding:'0.75rem 0.875rem' }}>
@@ -520,7 +502,6 @@ export default function Chat() {
                   style={{ flex:1, resize:'none', background:'transparent', border:'none', outline:'none', fontSize:'0.9rem', color:'#0f172a', lineHeight:'1.5', minHeight:'24px', maxHeight:'120px', opacity: loading ? 0.5 : 1 }}
                 />
                 <button
-                  className="send-btn"
                   onClick={sendMessage}
                   disabled={!input.trim() || loading}
                   style={{ width:'36px', height:'36px', background: (!input.trim()||loading) ? '#e2e8f0' : 'linear-gradient(135deg,#6366f1,#8b5cf6)', border:'none', borderRadius:'10px', cursor: (!input.trim()||loading) ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', flexShrink:0, transition:'all 0.15s' }}

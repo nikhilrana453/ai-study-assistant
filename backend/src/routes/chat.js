@@ -94,7 +94,6 @@ const checkOutputSafety = (answer) => {
 // ============================================================
 const buildSystemPrompt = (courseName, context, hintMode) => {
   const textSection = context.length > 0 ? context : 'NO MATERIALS FOUND.';
- 
   if (hintMode) {
     return `You are a study tutor for "${courseName}".
 Use ONLY the TEXT below to give a short guiding hint.
@@ -109,7 +108,6 @@ If the topic is not in the TEXT below, say only:
 TEXT:
 ${textSection}`;
   }
- 
   return `You are a study tutor for "${courseName}".
 Answer using ONLY the information in the TEXT below.
 Write your answer ONCE — never repeat any sentence or bullet point.
@@ -143,7 +141,7 @@ router.get('/test', async (req, res) => {
 });
  
 // ============================================================
-// COURSE ID HELPER — GET /api/chat/course-id-helper
+// COURSE ID HELPER
 // ============================================================
 router.get('/course-id-helper', async (req, res) => {
   try {
@@ -155,7 +153,7 @@ router.get('/course-id-helper', async (req, res) => {
 });
  
 // ============================================================
-// CHECK CHUNKS — GET /api/chat/check-chunks?courseId=xxx
+// CHECK CHUNKS
 // ============================================================
 router.get('/check-chunks', async (req, res) => {
   try {
@@ -209,13 +207,10 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
  
   const systemPrompt = buildSystemPrompt(course.name, context, hintMode);
  
-  // Use existing session or create new one
+  // Use existing session or create new
   let session = null;
   if (existingSessionId) {
     session = await prisma.chatSession.findUnique({ where: { id: existingSessionId } });
-  }
-  if (!session) {
-    session = await prisma.chatSession.findFirst({ where: { userId: req.user.id, courseId } });
   }
   if (!session) {
     session = await prisma.chatSession.create({ data: { userId: req.user.id, courseId } });
@@ -250,7 +245,6 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
 // STREAMING CHAT — POST /api/chat/message/stream
 // ============================================================
 router.post('/message/stream', authenticateToken, checkEnrollment, async (req, res) => {
-  // ── KEY CHANGE: also read sessionId from frontend ─────────
   const { question, courseId, hintMode, sessionId: existingSessionId } = req.body;
  
   if (!question || !courseId) return res.status(400).json({ error: 'question and courseId required' });
@@ -305,20 +299,19 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
  
   const systemPrompt = buildSystemPrompt(course.name, context, hintMode);
  
-  // ── Session logic: use existing or create new ─────────────
-  // If frontend sends sessionId → use that session (continuing chat)
-  // If frontend sends null/undefined → create NEW session (new chat)
+  // ── Session logic ─────────────────────────────────────────
+  // existingSessionId = null  → New Chat clicked → create fresh session
+  // existingSessionId = value → Continue session → use that session
   let session = null;
  
   if (existingSessionId) {
-    // Continue existing session
     session = await prisma.chatSession.findUnique({
       where: { id: existingSessionId }
     });
   }
  
   if (!session) {
-    // Create a brand new session (New Chat clicked)
+    // Create brand new session
     session = await prisma.chatSession.create({
       data: { userId: req.user.id, courseId }
     });
@@ -337,10 +330,10 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
   });
   const messages = recentMessages.reverse().map(m => ({ role: m.role, content: m.content }));
  
-  // Send sources + sessionId to frontend before streaming
+  // Send sources + sessionId to frontend BEFORE streaming starts
   res.write(`data: ${JSON.stringify({ sources, sessionId: session.id })}\n\n`);
  
-  // Stream answer AND save to database when done
+  // Stream answer and save to database when complete
   await chatStream(messages, systemPrompt, res, async (fullAnswer) => {
     // Save complete AI answer to database
     const savedMessage = await prisma.message.create({
@@ -352,8 +345,14 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
       }
     });
  
-    // Send messageId to frontend so feedback/bookmark buttons appear
-    res.write(`data: ${JSON.stringify({ done: true, messageId: savedMessage.id })}\n\n`);
+    // Send messageId + sessionId to frontend
+    // messageId → enables feedback and bookmark buttons
+    // sessionId → frontend updates currentSessionId
+    res.write(`data: ${JSON.stringify({
+      done:      true,
+      messageId: savedMessage.id,
+      sessionId: session.id,
+    })}\n\n`);
     res.end();
   });
 });
@@ -396,7 +395,7 @@ router.get('/sessions', authenticateToken, async (req, res) => {
 });
  
 // ============================================================
-// SEARCH PAST CHATS — GET /api/chat/search
+// SEARCH PAST CHATS
 // ============================================================
 router.get('/search', authenticateToken, async (req, res) => {
   const { q, courseId } = req.query;
@@ -414,3 +413,69 @@ router.get('/search', authenticateToken, async (req, res) => {
 });
  
 module.exports = router;
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
