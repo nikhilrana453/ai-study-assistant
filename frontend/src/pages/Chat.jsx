@@ -119,7 +119,7 @@ export default function Chat() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ question, courseId, hintMode })
+        body: JSON.stringify({ question, courseId, hintMode, sessionId: currentSessionId })
       });
 
       const reader  = response.body.getReader();
@@ -148,20 +148,26 @@ export default function Chat() {
               });
             }
             if (data.done) {
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: 'assistant', content: fullAnswer,
-                  sources, streaming: false, createdAt: new Date().toISOString(),
-                };
-                return updated;
-              });
-              const sessRes = await api.get(`/chat/sessions?courseId=${courseId}`);
-              setSessions(sessRes.data);
-              if (!currentSessionId && sessRes.data.length > 0) {
-                setCurrentSessionId(sessRes.data[0].id);
-              }
-            }
+  setMessages(prev => {
+    const updated = [...prev];
+    updated[updated.length - 1] = {
+      role:      'assistant',
+      content:   fullAnswer,
+      sources,
+      streaming: false,
+      id:        data.messageId,  // ← THIS is critical
+      createdAt: new Date().toISOString(),
+    };
+    return updated;
+  });
+
+  // Refresh sidebar sessions list
+  const sessRes = await api.get(`/chat/sessions?courseId=${courseId}`);
+  setSessions(sessRes.data);
+  if (!currentSessionId && sessRes.data.length > 0) {
+    setCurrentSessionId(sessRes.data[0].id);
+  }
+}
           } catch (e) { /* skip malformed */ }
         }
       }
@@ -183,18 +189,24 @@ export default function Chat() {
 
   // ── Load past session ─────────────────────────────────────────────────────
   const loadSession = async (session) => {
-    setCurrentSessionId(session.id);
-    setError('');
-    setSessionLoading(true);
-    try {
-      const res = await api.get(`/chat/history?courseId=${courseId}&sessionId=${session.id}`);
-      setMessages(res.data.messages?.length > 0 ? res.data.messages : []);
-    } catch {
+  setCurrentSessionId(session.id);
+  setError('');
+  setSessionLoading(true);
+  try {
+    // Pass sessionId so backend loads the right session
+    const res = await api.get(`/chat/history?courseId=${courseId}&sessionId=${session.id}`);
+    if (res.data.messages?.length > 0) {
+      setMessages(res.data.messages);
+    } else {
       setMessages([]);
-    } finally {
-      setSessionLoading(false);
     }
-  };
+  } catch (err) {
+    console.error('Load session error:', err);
+    setMessages([]);
+  } finally {
+    setSessionLoading(false);
+  }
+};
 
   const startNewChat = () => {
     setMessages([]);

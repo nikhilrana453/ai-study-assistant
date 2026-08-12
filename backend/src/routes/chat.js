@@ -162,7 +162,11 @@ router.get('/check-chunks', async (req, res) => {
     const results = await searchMaterials('lecture notes content', req.query.courseId);
     res.json({
       chunksFound: results.length,
-      content: results.map(r => ({ text: r.text.substring(0, 200), source: r.metadata.materialTitle, distance: r.distance }))
+      content: results.map(r => ({
+        text:     r.text.substring(0, 200),
+        source:   r.metadata.materialTitle,
+        distance: r.distance
+      }))
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -173,7 +177,7 @@ router.get('/check-chunks', async (req, res) => {
 // MAIN CHAT — POST /api/chat/message (non-streaming)
 // ============================================================
 router.post('/message', authenticateToken, checkEnrollment, async (req, res) => {
-  const { question, courseId, hintMode } = req.body;
+  const { question, courseId, hintMode, sessionId: existingSessionId } = req.body;
  
   if (!question || !courseId) return res.status(400).json({ error: 'question and courseId are required' });
  
@@ -197,14 +201,25 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
   if (relevantChunks.length > 0) {
     const topChunks = relevantChunks.slice(0, 3);
     context = '\n\nRelevant course materials:\n' +
-      topChunks.map((chunk, i) => `[Source ${i + 1}: ${chunk.metadata.materialTitle}]\n${chunk.text.substring(0, 800)}`).join('\n\n');
+      topChunks.map((chunk, i) =>
+        `[Source ${i + 1}: ${chunk.metadata.materialTitle}]\n${chunk.text.substring(0, 800)}`
+      ).join('\n\n');
     sources = [...new Set(topChunks.map(c => c.metadata.materialTitle))];
   }
  
   const systemPrompt = buildSystemPrompt(course.name, context, hintMode);
  
-  let session = await prisma.chatSession.findFirst({ where: { userId: req.user.id, courseId } });
-  if (!session) session = await prisma.chatSession.create({ data: { userId: req.user.id, courseId } });
+  // Use existing session or create new one
+  let session = null;
+  if (existingSessionId) {
+    session = await prisma.chatSession.findUnique({ where: { id: existingSessionId } });
+  }
+  if (!session) {
+    session = await prisma.chatSession.findFirst({ where: { userId: req.user.id, courseId } });
+  }
+  if (!session) {
+    session = await prisma.chatSession.create({ data: { userId: req.user.id, courseId } });
+  }
  
   await prisma.message.create({ data: { sessionId: session.id, role: 'user', content: question } });
  
@@ -220,7 +235,12 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
   const finalAnswer = outputCheck.cleanAnswer;
  
   const savedMessage = await prisma.message.create({
-    data: { sessionId: session.id, role: 'assistant', content: finalAnswer, sources: sources.length > 0 ? sources : null }
+    data: {
+      sessionId: session.id,
+      role:      'assistant',
+      content:   finalAnswer,
+      sources:   sources.length > 0 ? sources : null
+    }
   });
  
   res.json({ answer: finalAnswer, sources, messageId: savedMessage.id, sessionId: session.id });
@@ -230,7 +250,8 @@ router.post('/message', authenticateToken, checkEnrollment, async (req, res) => 
 // STREAMING CHAT — POST /api/chat/message/stream
 // ============================================================
 router.post('/message/stream', authenticateToken, checkEnrollment, async (req, res) => {
-  const { question, courseId, hintMode } = req.body;
+  // ── KEY CHANGE: also read sessionId from frontend ─────────
+  const { question, courseId, hintMode, sessionId: existingSessionId } = req.body;
  
   if (!question || !courseId) return res.status(400).json({ error: 'question and courseId required' });
  
@@ -276,20 +297,39 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
   if (relevantChunks.length > 0) {
     const topChunks = relevantChunks.slice(0, 3);
     context = '\n\nRelevant course materials:\n' +
-      topChunks.map((chunk, i) => `[Source ${i + 1}: ${chunk.metadata.materialTitle}]\n${chunk.text.substring(0, 800)}`).join('\n\n');
+      topChunks.map((chunk, i) =>
+        `[Source ${i + 1}: ${chunk.metadata.materialTitle}]\n${chunk.text.substring(0, 800)}`
+      ).join('\n\n');
     sources = [...new Set(topChunks.map(c => c.metadata.materialTitle))];
   }
  
   const systemPrompt = buildSystemPrompt(course.name, context, hintMode);
  
-  // Get or create session
-  let session = await prisma.chatSession.findFirst({ where: { userId: req.user.id, courseId } });
-  if (!session) session = await prisma.chatSession.create({ data: { userId: req.user.id, courseId } });
+  // ── Session logic: use existing or create new ─────────────
+  // If frontend sends sessionId → use that session (continuing chat)
+  // If frontend sends null/undefined → create NEW session (new chat)
+  let session = null;
+ 
+  if (existingSessionId) {
+    // Continue existing session
+    session = await prisma.chatSession.findUnique({
+      where: { id: existingSessionId }
+    });
+  }
+ 
+  if (!session) {
+    // Create a brand new session (New Chat clicked)
+    session = await prisma.chatSession.create({
+      data: { userId: req.user.id, courseId }
+    });
+  }
  
   // Save user message
-  await prisma.message.create({ data: { sessionId: session.id, role: 'user', content: question } });
+  await prisma.message.create({
+    data: { sessionId: session.id, role: 'user', content: question }
+  });
  
-  // Get recent messages for context
+  // Get recent messages for AI context
   const recentMessages = await prisma.message.findMany({
     where: { sessionId: session.id },
     orderBy: { createdAt: 'desc' },
@@ -297,13 +337,12 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
   });
   const messages = recentMessages.reverse().map(m => ({ role: m.role, content: m.content }));
  
-  // Send sources before streaming starts
+  // Send sources + sessionId to frontend before streaming
   res.write(`data: ${JSON.stringify({ sources, sessionId: session.id })}\n\n`);
  
-  // ── KEY FIX: Stream AND save the answer ──────────────────
+  // Stream answer AND save to database when done
   await chatStream(messages, systemPrompt, res, async (fullAnswer) => {
-    // This callback runs AFTER streaming completes
-    // Save the complete AI answer to database
+    // Save complete AI answer to database
     const savedMessage = await prisma.message.create({
       data: {
         sessionId: session.id,
@@ -313,7 +352,7 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
       }
     });
  
-    // Send messageId back to frontend so feedback/bookmark buttons appear
+    // Send messageId to frontend so feedback/bookmark buttons appear
     res.write(`data: ${JSON.stringify({ done: true, messageId: savedMessage.id })}\n\n`);
     res.end();
   });
@@ -325,6 +364,7 @@ router.post('/message/stream', authenticateToken, checkEnrollment, async (req, r
 router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId, sessionId } = req.query;
   let session;
+ 
   if (sessionId) {
     session = await prisma.chatSession.findUnique({
       where: { id: sessionId },
@@ -333,10 +373,12 @@ router.get('/history', authenticateToken, checkEnrollment, async (req, res) => {
   } else {
     session = await prisma.chatSession.findFirst({
       where: { userId: req.user.id, courseId },
-      include: { messages: { orderBy: { createdAt: 'asc' } } }
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+      orderBy: { createdAt: 'desc' }
     });
   }
-  if (!session) return res.json({ messages: [] });
+ 
+  if (!session) return res.json({ messages: [], sessionId: null });
   res.json({ messages: session.messages, sessionId: session.id });
 });
  
@@ -354,7 +396,7 @@ router.get('/sessions', authenticateToken, async (req, res) => {
 });
  
 // ============================================================
-// SEARCH PAST CHATS — GET /api/chat/search?q=query&courseId=xxx
+// SEARCH PAST CHATS — GET /api/chat/search
 // ============================================================
 router.get('/search', authenticateToken, async (req, res) => {
   const { q, courseId } = req.query;
@@ -372,4 +414,3 @@ router.get('/search', authenticateToken, async (req, res) => {
 });
  
 module.exports = router;
- 
