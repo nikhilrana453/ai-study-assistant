@@ -10,6 +10,7 @@ import UploadMaterial from './pages/UploadMaterial';
 import Bookmarks      from './pages/Bookmarks';
 import Quiz           from './pages/Quiz';
 import Flashcards     from './pages/Flashcards';
+import Analytics from './pages/Analytics';
 
 function HomeRedirect() {
   const { token, user } = useAuth();
@@ -51,6 +52,11 @@ export default function App() {
           } />
           <Route path="/upload" element={
             <ProtectedRoute adminOnly><UploadMaterial /></ProtectedRoute>
+          } />
+
+         
+          <Route path="/admin/analytics" element={
+            <ProtectedRoute adminOnly><Analytics /></ProtectedRoute>
           } />
 
           <Route path="*" element={<HomeRedirect />} />

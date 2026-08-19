@@ -78,6 +78,9 @@ export default function AdminDashboard() {
             <button onClick={() => navigate('/admin/upload')} style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)', border:'none', color:'#fff', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'600' }}>
               ↑ Upload Materials
             </button>
+            <button onClick={() => navigate('/admin/analytics')} style={{ background:'linear-gradient(135deg,#10b981,#059669)', border:'none', color:'#fff', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'600' }}>
+              📊 Analytics
+            </button>
             <button onClick={() => navigate('/dashboard')} style={{ background:'none', border:'1px solid #e2e8f0', color:'#64748b', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer' }}>
               Dashboard
             </button>
