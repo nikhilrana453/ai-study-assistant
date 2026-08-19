@@ -26,6 +26,7 @@ app.use('/api/feedback',   require('./routes/feedback'));
 app.use('/api/bookmarks',  require('./routes/bookmarks'));
 app.use('/api/quiz',       require('./routes/quiz'));
 app.use('/api/flashcards', require('./routes/flashcards'));
+app.use('/api/admin', require('./routes/analytics'));
 
 // ── Health Check ─────────────────────────────────────
 app.get('/', (req, res) => {
