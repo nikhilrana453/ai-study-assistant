@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import NotificationBell from '../components/NotificationBell';
 
 const COLORS = [
   { bg:'#eff6ff', border:'#bfdbfe', icon:'#3b82f6', text:'#1d4ed8' },
@@ -42,6 +43,7 @@ export default function Dashboard() {
                 Admin Panel
               </button>
             )}
+            <NotificationBell />
             <div style={{ width:'32px', height:'32px', background:'#eff6ff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', fontSize:'13px', color:'#6366f1' }}>
               {user?.name?.charAt(0).toUpperCase()}
             </div>

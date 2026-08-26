@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import ReactMarkdown from 'react-markdown';
 import { useTheme } from '../context/ThemeContext';
+import NotificationBell from '../components/NotificationBell';
 
 
 // ── Helper: parse sources from DB (stored as JSON) ───────────
@@ -304,6 +305,7 @@ export default function Chat() {
               {hintMode && <span style={{ background:'#fef3c7', color:'#92400e', fontSize:'0.68rem', fontWeight:'600', padding:'0.15rem 0.45rem', borderRadius:'20px' }}>ON</span>}
             </div>
             <div style={{ width:'1px', height:'20px', background:'#e2e8f0' }} />
+            <NotificationBell />
             <div style={{ width:'28px', height:'28px', background:'#eff6ff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', fontSize:'12px', color:'#6366f1' }}>
               {user?.name?.charAt(0).toUpperCase()}
             </div>
