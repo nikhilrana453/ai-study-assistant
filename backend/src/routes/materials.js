@@ -70,6 +70,44 @@ router.post(
   }
 );
 
+// POST /api/materials/summarise
+router.post('/summarise', authenticateToken, checkEnrollment, async (req, res) => {
+  const { courseId } = req.body;
+  if (!courseId) return res.status(400).json({ error: 'courseId required' });
+
+  try {
+    const { searchMaterials } = require('../services/ragService');
+    const { chat }            = require('../services/openaiService');
+
+    const chunks = await searchMaterials('key concepts summary overview main topics', courseId);
+    if (chunks.length === 0) {
+      return res.status(404).json({ error: 'No materials found. Please upload lecture notes first.' });
+    }
+
+    const context = chunks.slice(0, 5).map(c => c.text).join('\n\n');
+
+    const systemPrompt = `You are a study assistant.
+Summarise the TEXT below in a clear, student-friendly way.
+Use plain language.
+Structure your summary with these sections:
+- Key Topics Covered
+- Main Concepts and Definitions
+- Important Takeaways
+Keep the total summary under 400 words.
+TEXT:
+${context}`;
+
+    const summary = await chat(
+      [{ role: 'user', content: 'Summarise the course materials.' }],
+      systemPrompt
+    );
+
+    res.json({ summary, chunksUsed: chunks.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId } = req.query;
   const materials = await prisma.material.findMany({
