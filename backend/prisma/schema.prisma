@@ -4,19 +4,20 @@ generator client {
 
 datasource db {
   provider = "postgresql"
- url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id          String        @id @default(uuid())
-  name        String
-  email       String        @unique
-  password    String
-  role        Role          @default(STUDENT)
-  createdAt   DateTime      @default(now())
-  enrollments Enrollment[]
-  sessions    ChatSession[]
-  bookmarks   Bookmark[]
+  id                 String              @id @default(uuid())
+  name               String
+  email              String              @unique
+  password           String
+  role               Role                @default(STUDENT)
+  createdAt          DateTime            @default(now())
+  enrollments        Enrollment[]
+  sessions           ChatSession[]
+  bookmarks          Bookmark[]
+  passwordResetToken PasswordResetToken?
 }
 
 model Course {
@@ -37,20 +38,35 @@ model Enrollment {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
   course    Course   @relation(fields: [courseId], references: [id])
+
   @@unique([userId, courseId])
 }
 
 model Material {
-  id        String   @id @default(uuid())
+  id        String          @id @default(uuid())
   courseId  String
   title     String
   type      String
   filePath  String
   topic     String?
   week      Int?
-  createdAt DateTime @default(now())
-  course    Course   @relation(fields: [courseId], references: [id])
-  chunks    MaterialChunk[] 
+  createdAt DateTime        @default(now())
+  course    Course          @relation(fields: [courseId], references: [id])
+  chunks    MaterialChunk[]
+}
+
+model MaterialChunk {
+  id            String                      @id @default(uuid())
+  materialId    String
+  materialTitle String
+  courseId      String
+  text          String
+  embedding     Unsupported("vector(1536)")?
+  chunkIndex    Int
+  topic         String?
+  week          String?
+  createdAt     DateTime                    @default(now())
+  material      Material                    @relation(fields: [materialId], references: [id], onDelete: Cascade)
 }
 
 model ChatSession {
@@ -91,20 +107,16 @@ model Bookmark {
   message   Message  @relation(fields: [messageId], references: [id])
 }
 
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 enum Role {
   STUDENT
   ADMIN
-}
-model MaterialChunk {
-  id            String                        @id @default(uuid())
-  materialId    String
-  materialTitle String
-  courseId      String
-  text          String
-  embedding     Unsupported("vector(1536)")?
-  chunkIndex    Int
-  topic         String?
-  week          String?
-  createdAt     DateTime                      @default(now())
-  material      Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
 }
