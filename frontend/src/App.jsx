@@ -11,6 +11,7 @@ import Bookmarks      from './pages/Bookmarks';
 import Quiz           from './pages/Quiz';
 import Flashcards     from './pages/Flashcards';
 import Analytics from './pages/Analytics';
+import { ThemeProvider } from './context/ThemeContext';
 
 function HomeRedirect() {
   const { token, user } = useAuth();
@@ -21,6 +22,7 @@ function HomeRedirect() {
 
 export default function App() {
   return (
+    <ThemeProvider>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
@@ -63,5 +65,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </ThemeProvider>
   );
 }

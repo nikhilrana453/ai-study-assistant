@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import ReactMarkdown from 'react-markdown';
 
+
+
 // ── Helper: parse sources from DB (stored as JSON) ───────────
 const parseSources = (sources) => {
   if (!sources) return [];
@@ -30,6 +32,8 @@ export default function Chat() {
   const [bookmarks, setBookmarks]               = useState({});
   const bottomRef   = useRef(null);
   const textareaRef = useRef(null);
+  const { dark, toggle, theme } = useTheme();
+
 
   // ── Load course + sessions + latest history ───────────────
   useEffect(() => {
@@ -305,6 +309,9 @@ export default function Chat() {
             </div>
             <span style={{ fontSize:'0.82rem', color:'#475569' }}>{user?.name}</span>
             <button onClick={logout} style={{ background:'#fef2f2', border:'1px solid #fecaca', color:'#dc2626', padding:'0.3rem 0.7rem', borderRadius:'8px', fontSize:'0.78rem', cursor:'pointer', fontWeight:'500' }}>Sign out</button>
+            <button onClick={toggle} style={{ background:'#f1f5f9', border:'none', borderRadius:'8px', width:'34px', height:'34px', cursor:'pointer', fontSize:'16px' }}>
+            {dark ? '☀️' : '🌙'}
+            </button>
           </div>
         </div>
       </nav>
