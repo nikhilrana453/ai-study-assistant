@@ -28,6 +28,7 @@ app.use('/api/quiz',       require('./routes/quiz'));
 app.use('/api/flashcards', require('./routes/flashcards'));
 app.use('/api/admin', require('./routes/analytics'));
 app.use('/api/profile', require('./routes/profile'));
+app.use('/api/notifications', require('./routes/notifications'));
 // ── Health Check ─────────────────────────────────────
 app.get('/', (req, res) => {
   res.json({ status: 'OK', message: 'AI Study Assistant API Running' });

@@ -1,9 +1,8 @@
 const express = require('express');
 const router  = express.Router();
 const prisma  = require('../prismaClient');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcryptjs');4
 const { authenticateToken } = require('../middleware/auth');
-
 // GET /api/profile
 router.get('/', authenticateToken, async (req, res) => {
   try {
