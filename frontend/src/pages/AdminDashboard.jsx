@@ -7,6 +7,8 @@ export default function AdminDashboard() {
   const [courses, setCourses] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [stats, setStats] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [selectedCourse, setSelectedCourse] = useState(null);
@@ -17,7 +19,7 @@ export default function AdminDashboard() {
   const fetchCourses = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/admin/courses');  // ✅ Just the endpoint path
+      const response = await api.get('/admin/courses');
       setCourses(response.data.courses);
       setMessage('✅ Courses loaded');
     } catch (err) {
@@ -61,6 +63,32 @@ export default function AdminDashboard() {
       const response = await api.get('/admin/stats');
       setStats(response.data.stats);
       setMessage('✅ Stats loaded');
+    } catch (err) {
+      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
+    }
+    setLoading(false);
+  };
+
+  // Fetch analytics
+  const fetchAnalytics = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/analytics');
+      setAnalytics(response.data);
+      setMessage('✅ Analytics loaded');
+    } catch (err) {
+      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
+    }
+    setLoading(false);
+  };
+
+  // Fetch students
+  const fetchStudents = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/analytics/students');
+      setStudents(response.data.students);
+      setMessage('✅ Students loaded');
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
     }
@@ -142,6 +170,10 @@ export default function AdminDashboard() {
     if (activeTab === 'courses') fetchCourses();
     if (activeTab === 'enrollments') fetchEnrollments();
     if (activeTab === 'stats') fetchStats();
+    if (activeTab === 'analytics') {
+      fetchAnalytics();
+      fetchStudents();
+    }
   }, [activeTab]);
 
   return (
@@ -173,6 +205,12 @@ export default function AdminDashboard() {
           onClick={() => setActiveTab('stats')}
         >
           📊 Stats
+        </button>
+        <button
+          className={activeTab === 'analytics' ? 'tab active' : 'tab'}
+          onClick={() => setActiveTab('analytics')}
+        >
+          📈 Analytics
         </button>
       </div>
 
@@ -470,6 +508,109 @@ export default function AdminDashboard() {
                   <p className="stat-number">{stats.bookmarks}</p>
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ANALYTICS TAB */}
+      {activeTab === 'analytics' && (
+        <div className="tab-content">
+          <div className="section-header">
+            <h2>Analytics & Insights</h2>
+          </div>
+
+          {/* Analytics Summary Cards */}
+          {analytics && analytics.summaryCards && (
+            <div className="stats-grid">
+              {analytics.summaryCards.map((card, index) => (
+                <div key={index} className="stat-card">
+                  <span className="stat-icon">{card.icon}</span>
+                  <div className="stat-content">
+                    <h3>{card.label}</h3>
+                    <p className="stat-number">{card.value}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Course Statistics */}
+          {analytics && analytics.courseStats && analytics.courseStats.length > 0 && (
+            <div className="subsection">
+              <h3>📊 Course Performance</h3>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Course</th>
+                    <th>Students</th>
+                    <th>Messages</th>
+                    <th>Avg Satisfaction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.courseStats.map((course, idx) => (
+                    <tr key={idx}>
+                      <td>{course.courseName}</td>
+                      <td>{course.studentCount}</td>
+                      <td>{course.messageCount}</td>
+                      <td>{course.avgSatisfaction ? course.avgSatisfaction.toFixed(1) + '★' : 'N/A'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Recent Questions */}
+          {analytics && analytics.recentQuestions && analytics.recentQuestions.length > 0 && (
+            <div className="subsection">
+              <h3>❓ Recent Questions</h3>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Question</th>
+                    <th>Course</th>
+                    <th>Student</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.recentQuestions.slice(0, 10).map((q, idx) => (
+                    <tr key={idx}>
+                      <td>{q.question}</td>
+                      <td>{q.courseName}</td>
+                      <td>{q.studentName}</td>
+                      <td>{new Date(q.createdAt).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Student Activity */}
+          {students && students.length > 0 && (
+            <div className="subsection">
+              <h3>👥 Student Activity</h3>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Sessions</th>
+                    <th>Last Active</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {students.map((student, idx) => (
+                    <tr key={idx}>
+                      <td>{student.name}</td>
+                      <td>{student.sessionCount || 0}</td>
+                      <td>{student.lastActive ? new Date(student.lastActive).toLocaleDateString() : 'Never'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
