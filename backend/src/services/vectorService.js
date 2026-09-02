@@ -1,114 +1,161 @@
-// src/services/vectorService.js
-//
-// Vector storage + similarity search using pgvector on your Neon Postgres,
-// accessed through Prisma's raw-query API. No ChromaDB, no Ollama, no localhost.
-//
-// The public interface (addDocuments / searchDocuments / deleteDocuments) and the
-// SHAPE that searchDocuments returns are unchanged from your previous version,
-// so ragService.js and chromaService.js do NOT need any edits.
- 
+// ============================================================
+// vectorService.js — PostgreSQL pgvector Implementation
+// ============================================================
+// Replaces ChromaDB. Uses Neon PostgreSQL with pgvector extension
+// for all vector operations (storage + similarity search)
+// ============================================================
+
 const prisma = require('../prismaClient');
- 
-// pgvector accepts a vector literal formatted like '[0.1,0.2,0.3]'.
-const toVectorLiteral = (arr) => `[${arr.join(',')}]`;
- 
-// Store chunks (each with its OpenAI embedding) in Postgres.
+
+/**
+ * Search for similar documents using pgvector cosine similarity
+ * @param {string} courseId - Course ID to filter by
+ * @param {number[]} queryEmbedding - The query embedding vector
+ * @param {number} limit - Number of results to return
+ * @returns {Promise<Array>} - Similar chunks with metadata and distance
+ */
+const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
+  try {
+    // Convert embedding array to pgvector format: [x,y,z]
+    const embeddingStr = `[${queryEmbedding.join(',')}]`;
+
+    // Use raw SQL for pgvector cosine similarity search
+    // <=> operator = cosine distance (0 = identical, 2 = opposite)
+    const results = await prisma.$queryRaw`
+      SELECT
+        id,
+        text,
+        embedding,
+        "materialId",
+        "materialTitle",
+        "courseId",
+        topic,
+        week,
+        "chunkIndex",
+        -- Calculate cosine distance (lower = more similar)
+        (embedding <=> ${embeddingStr}::vector) AS distance
+      FROM "MaterialChunk"
+      WHERE "courseId" = ${courseId}
+      -- Filter by distance threshold (0-2 scale, lower = better)
+      AND (embedding <=> ${embeddingStr}::vector) < 1.8
+      ORDER BY distance ASC
+      LIMIT ${limit}
+    `;
+
+    if (!results || results.length === 0) {
+      console.log(`No matching documents found for course ${courseId}`);
+      return { documents: [[]], metadatas: [[]], distances: [[]] };
+    }
+
+    // Format results to match ChromaDB-like response structure
+    // This maintains compatibility with ragService.js
+    const documents = results.map(r => r.text);
+    const metadatas = results.map(r => ({
+      materialId: r.materialId,
+      materialTitle: r.materialTitle,
+      courseId: r.courseId,
+      topic: r.topic || '',
+      week: r.week || '',
+      chunkIndex: r.chunkIndex
+    }));
+    const distances = results.map(r => r.distance);
+
+    console.log(`✅ Found ${documents.length} similar chunks (distance < 1.8)`);
+
+    return {
+      documents: [documents],
+      metadatas: [metadatas],
+      distances: [distances]
+    };
+
+  } catch (error) {
+    console.error('❌ Vector search error:', error.message);
+
+    // If pgvector not installed, give helpful error
+    if (error.message.includes('vector')) {
+      console.error('⚠️  pgvector extension may not be installed in Neon.');
+      console.error('Run: CREATE EXTENSION IF NOT EXISTS vector;');
+    }
+
+    return { documents: [[]], metadatas: [[]], distances: [[]] };
+  }
+};
+
+/**
+ * Add/store documents with embeddings in PostgreSQL
+ * (Called by ragService.js during material processing)
+ */
 const addDocuments = async (courseId, documents) => {
   try {
+    // Prisma doesn't handle pgvector insertion well,
+    // so use raw SQL for bulk insert
     for (const doc of documents) {
-      const embeddingLiteral = toVectorLiteral(doc.embedding);
- 
-      // We insert via raw SQL because the `embedding` column is a pgvector
-      // type, which Prisma's typed client (createMany) cannot write directly.
-      // Values are still parameterized, so this is safe from SQL injection.
+      // Convert embedding array to pgvector format
+      const embeddingStr = `[${doc.embedding.join(',')}]`;
+
       await prisma.$executeRaw`
-        INSERT INTO "MaterialChunk"
-          ("id", "materialId", "materialTitle", "courseId", "text",
-           "embedding", "chunkIndex", "topic", "week", "createdAt")
-        VALUES (
+        INSERT INTO "MaterialChunk" (
+          id,
+          "materialId",
+          "materialTitle",
+          "courseId",
+          text,
+          embedding,
+          "chunkIndex",
+          topic,
+          week,
+          "createdAt"
+        ) VALUES (
           ${doc.id},
           ${doc.metadata.materialId},
           ${doc.metadata.materialTitle},
-          ${courseId},
+          ${doc.metadata.courseId},
           ${doc.text},
-          ${embeddingLiteral}::vector,
-          ${parseInt(doc.metadata.chunkIndex || '0', 10)},
+          ${embeddingStr}::vector,
+          ${parseInt(doc.metadata.chunkIndex)},
           ${doc.metadata.topic || null},
           ${doc.metadata.week || null},
           NOW()
         )
-        ON CONFLICT ("id") DO NOTHING
+        ON CONFLICT (id) DO NOTHING
       `;
     }
- 
-    console.log(`✅ Stored ${documents.length} chunks in Postgres (pgvector)`);
-  } catch (err) {
-    console.error('Vector store error:', err);
-    throw err;
+
+    console.log(`✅ Stored ${documents.length} document chunks in PostgreSQL`);
+    return true;
+
+  } catch (error) {
+    console.error('❌ Error storing documents:', error.message);
+    throw error;
   }
 };
- 
-// Cosine-similarity search, done INSIDE Postgres with the pgvector `<=>`
-// operator (cosine distance). This uses the HNSW index, so it stays fast even
-// with many thousands of chunks — unlike loading every row into Node.
-//
-// Returns the same shape your old service returned:
-//   { documents: [[...]], metadatas: [[...]], distances: [[...]] }
-const searchDocuments = async (courseId, queryEmbedding, nResults = 4) => {
+
+/**
+ * Clear all chunks for a specific course (for re-indexing)
+ */
+const clearCourse = async (courseId) => {
   try {
-    const queryLiteral = toVectorLiteral(queryEmbedding);
- 
-    const rows = await prisma.$queryRaw`
-      SELECT
-        "text",
-        "materialId",
-        "materialTitle",
-        "courseId",
-        "topic",
-        "week",
-        "chunkIndex",
-        ("embedding" <=> ${queryLiteral}::vector) AS distance
-      FROM "MaterialChunk"
-      WHERE "courseId" = ${courseId}
-        AND "embedding" IS NOT NULL
-      ORDER BY "embedding" <=> ${queryLiteral}::vector
-      LIMIT ${nResults}
-    `;
- 
-    if (!rows || rows.length === 0) {
-      return { documents: [[]], metadatas: [[]], distances: [[]] };
-    }
- 
-    return {
-      documents: [rows.map((r) => r.text)],
-      metadatas: [
-        rows.map((r) => ({
-          materialId: r.materialId,
-          materialTitle: r.materialTitle,
-          courseId: r.courseId,
-          topic: r.topic || '',
-          week: r.week || '',
-          chunkIndex: String(r.chunkIndex),
-        })),
-      ],
-      distances: [rows.map((r) => Number(r.distance))],
-    };
-  } catch (err) {
-    console.error('Vector search error:', err);
-    return null;
+    const result = await prisma.materialChunk.deleteMany({
+      where: { courseId }
+    });
+    console.log(`✅ Cleared ${result.count} chunks for course ${courseId}`);
+    return result.count;
+  } catch (error) {
+    console.error('❌ Error clearing course:', error.message);
+    throw error;
   }
 };
- 
-// Delete chunks when a material is removed. This column-set doesn't touch the
-// vector type, so the normal Prisma client is fine here.
-const deleteDocuments = async (materialId) => {
-  try {
-    await prisma.materialChunk.deleteMany({ where: { materialId } });
-    console.log(`✅ Deleted chunks for material ${materialId}`);
-  } catch (err) {
-    console.error('Delete chunks error:', err);
-  }
+
+/**
+ * Get collection (no-op for pgvector, kept for compatibility)
+ */
+const getCollection = async (courseId) => {
+  return { courseId };
 };
- 
-module.exports = { addDocuments, searchDocuments, deleteDocuments };
- 
+
+module.exports = {
+  searchDocuments,
+  addDocuments,
+  clearCourse,
+  getCollection
+};

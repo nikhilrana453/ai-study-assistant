@@ -1,5 +1,11 @@
+// ============================================================
+// ragService.js — Retrieval-Augmented Generation Service
+// ============================================================
+// Now uses PostgreSQL + pgvector instead of ChromaDB
+// ============================================================
+
 const { embed } = require('./openaiService');
-const { addDocuments, searchDocuments } = require('./chromaService');
+const { addDocuments, searchDocuments } = require('./vectorService');
 const { extractText } = require('./fileParser');
 
 // ── Topic-based chunking ───────────────────────────────────────────────────
@@ -49,26 +55,33 @@ const chunkByWords = (text, chunkSize = 200) => {
 };
 
 // ── Process uploaded material ──────────────────────────────────────────────
+// Extracts text → chunks → embeds → stores in PostgreSQL
 const processMaterial = async (material) => {
   try {
-    console.log(`Processing material: ${material.title}`);
+    console.log(`📄 Processing material: ${material.title}`);
 
+    // Extract text from file (PDF, Word, etc)
     const text = await extractText(material.filePath, material.type);
     if (!text || text.trim().length === 0) {
-      console.log('No text extracted from file');
+      console.log('❌ No text extracted from file');
       return;
     }
 
-    // Use topic-based chunking instead of word-count
+    console.log(`✂️  Extracted ${text.length} characters`);
+
+    // Use topic-based chunking to preserve context
     const chunks = chunkByTopic(text);
-    console.log(`Created ${chunks.length} chunks`);
+    console.log(`🔀 Created ${chunks.length} chunks`);
 
     const documents = [];
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       if (chunk.trim().length < 10) continue;
 
+      // Generate embedding using OpenAI
+      console.log(`  📊 Embedding chunk ${i + 1}/${chunks.length}...`);
       const embedding = await embed(chunk);
+
       documents.push({
         id: `${material.id}_chunk_${i}`,
         text: chunk,
@@ -84,47 +97,63 @@ const processMaterial = async (material) => {
       });
     }
 
+    // Store all chunks in PostgreSQL with pgvector
     if (documents.length > 0) {
       await addDocuments(material.courseId, documents);
-      console.log(`✅ Stored ${documents.length} chunks for ${material.title}`);
+      console.log(`✅ Stored ${documents.length} chunks for "${material.title}"`);
     }
   } catch (err) {
-    console.error('Error processing material:', err);
+    console.error('❌ Error processing material:', err.message);
+    throw err;
   }
 };
 
 // ── Search for relevant materials ─────────────────────────────────────────
+// Uses pgvector cosine similarity search
 const searchMaterials = async (question, courseId) => {
   try {
+    console.log(`🔍 Searching for: "${question}"`);
+
     // Expand query for scope/objective type questions
     const scopeKeywords = ['scope', 'learn', 'objective', 'outcome', 'module', 'topic', 'cover', 'should', 'measuring', 'control', 'countermeasure'];
     const isScopeQuestion = scopeKeywords.some(k => question.toLowerCase().includes(k));
     const searchQuery = isScopeQuestion
-      ? question + ' controls measuring countermeasure objectives'
+      ? question + ' controls measuring countermeasure objectives outcomes'
       : question;
 
+    console.log(`📝 Search query: "${searchQuery}"`);
+
+    // Get embedding for the question
+    console.log(`🔑 Generating query embedding...`);
     const queryEmbedding = await embed(searchQuery);
 
-    // Get more results (5) then filter by distance
+    // Search using pgvector similarity (returns top 5)
+    console.log(`🗄️  Querying PostgreSQL pgvector...`);
     const results = await searchDocuments(courseId, queryEmbedding, 5);
 
     if (!results || !results.documents || results.documents[0].length === 0) {
+      console.log(`⚠️  No relevant chunks found for course ${courseId}`);
       return [];
     }
 
+    // Format results
     const chunks = results.documents[0].map((doc, i) => ({
       text:     doc,
       metadata: results.metadatas[0][i],
       distance: results.distances[0][i]
     }));
 
-    // Filter by distance threshold — 1.8 is more generous than old 1.5
+    // Filter by distance threshold (cosine distance < 1.8 is good)
     const filtered = chunks.filter(chunk => chunk.distance < 1.8);
 
-    console.log(`Found ${filtered.length} relevant chunks for: "${question}"`);
+    console.log(`✅ Found ${filtered.length} relevant chunks (distance < 1.8)`);
+    filtered.forEach((chunk, i) => {
+      console.log(`  [${i + 1}] Distance: ${chunk.distance.toFixed(2)} | Source: ${chunk.metadata.materialTitle}`);
+    });
+
     return filtered;
   } catch (err) {
-    console.error('Error searching materials:', err);
+    console.error('❌ Error searching materials:', err.message);
     return [];
   }
 };
