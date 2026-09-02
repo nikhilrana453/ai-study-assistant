@@ -10,6 +10,7 @@ export default function AdminDashboard() {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [courses, setCourses] = useState([]);
+  const [allMaterials, setAllMaterials] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -17,8 +18,6 @@ export default function AdminDashboard() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [courseMaterials, setCourseMaterials] = useState([]);
   const [editingCourse, setEditingCourse] = useState(null);
-  const [uploadFile, setUploadFile] = useState(null);
-  const [uploadCourseId, setUploadCourseId] = useState('');
 
   // ── Fetch stats ────────────────────────────────────────
   const fetchStats = async () => {
@@ -52,6 +51,19 @@ export default function AdminDashboard() {
 
       const materialsRes = await api.get(`/admin/course/${courseId}/materials`);
       setCourseMaterials(materialsRes.data.materials);
+    } catch (err) {
+      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
+    }
+    setLoading(false);
+  };
+
+  // ── Fetch ALL materials ──────────────────────────────────────
+  const fetchAllMaterials = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/admin/materials');
+      setAllMaterials(response.data.materials);
+      setMessage('✅ Materials loaded');
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
     }
@@ -112,6 +124,7 @@ export default function AdminDashboard() {
     try {
       const response = await api.delete(`/admin/material/${materialId}`);
       setMessage(`✅ ${response.data.message}`);
+      fetchAllMaterials();
       if (selectedCourse) {
         fetchCourseDetails(selectedCourse.id);
       }
@@ -141,37 +154,11 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Upload material ────────────────────────────────────────
-  const handleUploadMaterial = async () => {
-    if (!uploadFile || !uploadCourseId) {
-      setMessage('❌ Please select both a course and a file');
-      return;
-    }
-
-    setLoading(true);
-    const formData = new FormData();
-    formData.append('file', uploadFile);
-    formData.append('courseId', uploadCourseId);
-    formData.append('title', uploadFile.name);
-
-    try {
-      const response = await api.post('/admin/material/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      setMessage(`✅ ${response.data.message || 'Material uploaded successfully'}`);
-      setUploadFile(null);
-      setUploadCourseId('');
-      fetchCourses();
-    } catch (err) {
-      setMessage(`❌ Upload failed: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
   // ── Load initial data ──────────────────────────────────────
   useEffect(() => {
     if (activeTab === 'overview') fetchStats();
     if (activeTab === 'courses') fetchCourses();
+    if (activeTab === 'materials') fetchAllMaterials();
     if (activeTab === 'enrollments') fetchEnrollments();
   }, [activeTab]);
 
@@ -188,6 +175,9 @@ export default function AdminDashboard() {
             <span className="admin-navbar-title">🛠️ Admin Dashboard</span>
           </div>
           <div className="admin-navbar-right">
+            <button onClick={() => navigate('/upload')} className="admin-nav-btn admin-nav-accent">
+              📤 Upload Materials
+            </button>
             <button onClick={() => navigate('/analytics')} className="admin-nav-btn admin-nav-accent">
               📊 Analytics
             </button>
@@ -358,7 +348,7 @@ export default function AdminDashboard() {
               )}
             </div>
 
-            {/* Materials */}
+            {/* Materials in This Course */}
             <div className="admin-section">
               <h3>📄 Course Materials ({courseMaterials.length})</h3>
               {courseMaterials.length === 0 ? (
@@ -398,44 +388,54 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* MATERIALS TAB */}
+        {/* MATERIALS TAB - Show ALL Materials */}
         {activeTab === 'materials' && (
           <div className="admin-tab-content">
-            <h2>Upload Materials</h2>
-            <div className="admin-upload-form">
-              <div className="admin-form-group">
-                <label className="admin-form-label">Select Course</label>
-                <select
-                  value={uploadCourseId}
-                  onChange={(e) => setUploadCourseId(e.target.value)}
-                  className="admin-form-select"
-                >
-                  <option value="">Choose a course...</option>
-                  {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-
-              <div className="admin-form-group">
-                <label className="admin-form-label">Upload File (PDF, TXT, DOCX, etc.)</label>
-                <input
-                  type="file"
-                  onChange={(e) => setUploadFile(e.target.files?.[0])}
-                  className="admin-form-input"
-                />
-              </div>
-
+            <div className="admin-materials-header">
+              <h2>All Course Materials</h2>
               <button
-                onClick={handleUploadMaterial}
-                disabled={loading}
-                className="admin-btn admin-btn-upload"
+                className="admin-btn admin-btn-primary"
+                onClick={() => navigate('/upload')}
               >
-                {loading ? 'Uploading...' : 'Upload Material'}
+                📤 Upload New Material
               </button>
-
-              <p className="admin-form-hint">
-                💡 Upload any course material (PDF, Word, PowerPoint, Text files, etc.) to add to a course.
-              </p>
             </div>
+
+            {allMaterials.length === 0 ? (
+              <p>No materials found</p>
+            ) : (
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Course</th>
+                    <th>Type</th>
+                    <th>Chunks</th>
+                    <th>Uploaded Date</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allMaterials.map(m => (
+                    <tr key={m.id}>
+                      <td>{m.title}</td>
+                      <td>{m.course?.name || 'Unknown Course'}</td>
+                      <td><span className="admin-type-badge">{m.type}</span></td>
+                      <td>{m.chunkCount}</td>
+                      <td>{new Date(m.createdAt).toLocaleDateString()}</td>
+                      <td>
+                        <button
+                          className="admin-btn admin-btn-small admin-btn-danger"
+                          onClick={() => deleteMaterial(m.id)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
