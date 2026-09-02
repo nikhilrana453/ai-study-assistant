@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
@@ -10,7 +10,6 @@ export default function AdminDashboard() {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [courses, setCourses] = useState([]);
-  const [students, setStudents] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -21,7 +20,7 @@ export default function AdminDashboard() {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadCourseId, setUploadCourseId] = useState('');
 
-  // Fetch stats
+  // ── Fetch stats ────────────────────────────────────────
   const fetchStats = async () => {
     try {
       const response = await api.get('/admin/stats');
@@ -31,7 +30,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Fetch all courses
+  // ── Fetch all courses ──────────────────────────────────────
   const fetchCourses = async () => {
     setLoading(true);
     try {
@@ -44,7 +43,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // Fetch course details
+  // ── Fetch course details (materials + enrollments) ────────────
   const fetchCourseDetails = async (courseId) => {
     setLoading(true);
     try {
@@ -59,7 +58,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // Fetch enrollments
+  // ── Fetch enrollments ──────────────────────────────────────
   const fetchEnrollments = async () => {
     setLoading(true);
     try {
@@ -72,13 +71,16 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // Delete course
+  // ── Delete course ──────────────────────────────────────
   const deleteCourse = async (courseId) => {
-    if (!window.confirm('⚠️ Delete entire course? This cannot be undone.')) return;
+    if (!window.confirm('⚠️ This will delete the entire course, all materials, and enrollments. Continue?')) {
+      return;
+    }
+
     setLoading(true);
     try {
-      await api.delete(`/admin/course/${courseId}`);
-      setMessage('✅ Course deleted');
+      const response = await api.delete(`/admin/course/${courseId}`);
+      setMessage(`✅ ${response.data.message}`);
       fetchCourses();
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
@@ -86,12 +88,12 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // Update course
+  // ── Edit course ────────────────────────────────────────
   const updateCourse = async (courseId, courseData) => {
     setLoading(true);
     try {
-      await api.put(`/admin/course/${courseId}`, courseData);
-      setMessage('✅ Course updated');
+      const response = await api.put(`/admin/course/${courseId}`, courseData);
+      setMessage(`✅ ${response.data.message}`);
       setEditingCourse(null);
       fetchCourses();
     } catch (err) {
@@ -100,36 +102,73 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // Delete material
+  // ── Delete material ────────────────────────────────────────
   const deleteMaterial = async (materialId) => {
-    if (!window.confirm('⚠️ Delete this material?')) return;
+    if (!window.confirm('⚠️ Delete this material and all its chunks?')) {
+      return;
+    }
+
     setLoading(true);
     try {
-      await api.delete(`/admin/material/${materialId}`);
-      setMessage('✅ Material deleted');
-      if (selectedCourse) fetchCourseDetails(selectedCourse.id);
+      const response = await api.delete(`/admin/material/${materialId}`);
+      setMessage(`✅ ${response.data.message}`);
+      if (selectedCourse) {
+        fetchCourseDetails(selectedCourse.id);
+      }
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
     }
     setLoading(false);
   };
 
-  // Delete enrollment
+  // ── Delete enrollment (remove student) ──────────────────────────
   const deleteEnrollment = async (enrollmentId) => {
-    if (!window.confirm('⚠️ Remove this student?')) return;
+    if (!window.confirm('⚠️ Remove this student from the course?')) {
+      return;
+    }
+
     setLoading(true);
     try {
-      await api.delete(`/admin/enrollment/${enrollmentId}`);
-      setMessage('✅ Student removed');
+      const response = await api.delete(`/admin/enrollment/${enrollmentId}`);
+      setMessage(`✅ ${response.data.message}`);
       fetchEnrollments();
-      if (selectedCourse) fetchCourseDetails(selectedCourse.id);
+      if (selectedCourse) {
+        fetchCourseDetails(selectedCourse.id);
+      }
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
     }
     setLoading(false);
   };
 
-  // Load data based on active tab
+  // ── Upload material ────────────────────────────────────────
+  const handleUploadMaterial = async () => {
+    if (!uploadFile || !uploadCourseId) {
+      setMessage('❌ Please select both a course and a file');
+      return;
+    }
+
+    setLoading(true);
+    const formData = new FormData();
+    formData.append('file', uploadFile);
+    formData.append('courseId', uploadCourseId);
+    formData.append('title', uploadFile.name);
+
+    try {
+      const response = await api.post('/admin/material/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setMessage(`✅ ${response.data.message || 'Material uploaded successfully'}`);
+      setUploadFile(null);
+      setUploadCourseId('');
+      fetchCourses();
+    } catch (err) {
+      setMessage(`❌ Upload failed: ${err.response?.data?.error || err.message}`);
+    }
+    setLoading(false);
+  };
+
+  // ── Load initial data ──────────────────────────────────────
   useEffect(() => {
     if (activeTab === 'overview') fetchStats();
     if (activeTab === 'courses') fetchCourses();
@@ -137,76 +176,76 @@ export default function AdminDashboard() {
   }, [activeTab]);
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: 'system-ui,sans-serif', color: 'var(--text)' }}>
-
+    <div className="admin-dashboard-container">
       {/* Navbar */}
-      <nav style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', padding: '0 1.5rem', position: 'sticky', top: 0, zIndex: 100 }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <button onClick={() => navigate('/')} style={{ background: 'none', border: 'none', color: 'var(--text-h)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500' }}>
+      <nav className="admin-navbar">
+        <div className="admin-navbar-content">
+          <div className="admin-navbar-left">
+            <button onClick={() => navigate('/')} className="admin-nav-btn">
               ← Home
             </button>
-            <span style={{ color: 'var(--border)' }}>|</span>
-            <span style={{ fontWeight: '700', fontSize: '0.95rem', color: 'var(--text-h)' }}>🛠️ Admin Dashboard</span>
+            <span className="admin-nav-divider">|</span>
+            <span className="admin-navbar-title">🛠️ Admin Dashboard</span>
           </div>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <button onClick={() => navigate('/analytics')} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500' }}>
+          <div className="admin-navbar-right">
+            <button onClick={() => navigate('/analytics')} className="admin-nav-btn admin-nav-accent">
               📊 Analytics
             </button>
-            <button onClick={logout} style={{ background: 'var(--accent-bg)', color: 'var(--accent)', border: `1px solid var(--accent-border)`, padding: '0.35rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', fontSize: '0.8rem' }}>
+            <button onClick={logout} className="admin-nav-btn admin-nav-logout">
               Sign out
             </button>
           </div>
         </div>
       </nav>
 
-      {/* Message */}
+      {/* Message Alert */}
       {message && (
-        <div style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', padding: '0.75rem 1.5rem' }}>
-          <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-h)', fontSize: '0.875rem' }}>{message}</span>
-            <button onClick={() => setMessage('')} style={{ background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+        <div className="admin-message">
+          <div className="admin-message-content">
+            <span>{message}</span>
+            <button onClick={() => setMessage('')} className="admin-message-close">✕</button>
           </div>
         </div>
       )}
 
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem 1.5rem' }}>
-
+      {/* Main Content */}
+      <main className="admin-main">
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '2rem', flexWrap: 'wrap' }}>
-          {[
-            { id: 'overview', label: '📊 Overview' },
-            { id: 'courses', label: '📚 Courses' },
-            { id: 'materials', label: '📄 Materials' },
-            { id: 'enrollments', label: '👥 Enrollments' },
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: '0.75rem 1.5rem',
-                borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
-                color: activeTab === tab.id ? 'var(--accent)' : 'var(--text)',
-                cursor: 'pointer',
-                fontWeight: activeTab === tab.id ? '600' : '500',
-                fontSize: '0.95rem',
-                transition: 'all 0.2s',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="admin-tabs">
+          <button
+            className={`admin-tab ${activeTab === 'overview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('overview')}
+          >
+            📊 Overview
+          </button>
+          <button
+            className={`admin-tab ${activeTab === 'courses' ? 'active' : ''}`}
+            onClick={() => setActiveTab('courses')}
+          >
+            📚 Courses
+          </button>
+          <button
+            className={`admin-tab ${activeTab === 'materials' ? 'active' : ''}`}
+            onClick={() => setActiveTab('materials')}
+          >
+            📄 Materials
+          </button>
+          <button
+            className={`admin-tab ${activeTab === 'enrollments' ? 'active' : ''}`}
+            onClick={() => setActiveTab('enrollments')}
+          >
+            👥 Enrollments
+          </button>
         </div>
 
-        {loading && <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-h)' }}>⏳ Loading...</div>}
+        {/* Loading */}
+        {loading && <div className="admin-loading">⏳ Loading...</div>}
 
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && stats && (
-          <div>
-            <h2 style={{ color: 'var(--text-h)', marginBottom: '1.5rem' }}>Dashboard Overview</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+          <div className="admin-tab-content">
+            <h2>Dashboard Overview</h2>
+            <div className="admin-stats-grid">
               {[
                 { label: 'Total Users', value: stats.users, icon: '👥' },
                 { label: 'Courses', value: stats.courses, icon: '📚' },
@@ -217,16 +256,10 @@ export default function AdminDashboard() {
                 { label: 'Messages', value: stats.messages, icon: '💭' },
                 { label: 'Bookmarks', value: stats.bookmarks, icon: '🔖' },
               ].map((stat, i) => (
-                <div key={i} style={{
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '12px',
-                  padding: '1.5rem',
-                  textAlign: 'center',
-                }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{stat.icon}</div>
-                  <div style={{ fontSize: '2rem', fontWeight: '700', color: 'var(--accent)', marginBottom: '0.5rem' }}>{stat.value}</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-h)' }}>{stat.label}</div>
+                <div key={i} className="admin-stat-card">
+                  <div className="admin-stat-icon">{stat.icon}</div>
+                  <div className="admin-stat-number">{stat.value}</div>
+                  <div className="admin-stat-label">{stat.label}</div>
                 </div>
               ))}
             </div>
@@ -235,83 +268,86 @@ export default function AdminDashboard() {
 
         {/* COURSES TAB */}
         {activeTab === 'courses' && !selectedCourse && (
-          <div>
-            <h2 style={{ color: 'var(--text-h)', marginBottom: '1.5rem' }}>Manage Courses</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {courses.map(course => (
-                <div key={course.id} style={{
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '12px',
-                  padding: '1.5rem',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}>
-                  <div>
-                    <h3 style={{ color: 'var(--text-h)', margin: '0 0 0.5rem' }}>{course.name}</h3>
-                    <p style={{ color: 'var(--text)', margin: '0 0 0.5rem', fontSize: '0.9rem' }}>{course.subject}</p>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-h)', display: 'flex', gap: '1rem' }}>
-                      <span>👥 {course.studentCount} students</span>
-                      <span>📄 {course.materialCount} materials</span>
+          <div className="admin-tab-content">
+            <h2>Manage Courses</h2>
+            {courses.length === 0 ? (
+              <p>No courses found</p>
+            ) : (
+              <div className="admin-courses-list">
+                {courses.map(course => (
+                  <div key={course.id} className="admin-course-card">
+                    <div className="admin-course-info">
+                      <h3>{course.name}</h3>
+                      <p className="admin-subject">{course.subject}</p>
+                      <p className="admin-description">{course.description}</p>
+                      <div className="admin-course-stats">
+                        <span>👥 {course.studentCount} students</span>
+                        <span>📄 {course.materialCount} materials</span>
+                        <span>📅 {new Date(course.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                    <div className="admin-course-actions">
+                      <button
+                        className="admin-btn admin-btn-primary"
+                        onClick={() => fetchCourseDetails(course.id)}
+                      >
+                        View Details
+                      </button>
+                      <button
+                        className="admin-btn admin-btn-secondary"
+                        onClick={() => setEditingCourse(course)}
+                      >
+                        ✏️ Edit
+                      </button>
+                      <button
+                        className="admin-btn admin-btn-danger"
+                        onClick={() => deleteCourse(course.id)}
+                      >
+                        🗑️ Delete
+                      </button>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button onClick={() => fetchCourseDetails(course.id)} style={{
-                      background: 'var(--accent)', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', fontSize: '0.8rem'
-                    }}>
-                      View Details
-                    </button>
-                    <button onClick={() => setEditingCourse(course)} style={{
-                      background: 'var(--accent-bg)', color: 'var(--accent)', border: `1px solid var(--accent-border)`, padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', fontSize: '0.8rem'
-                    }}>
-                      Edit
-                    </button>
-                    <button onClick={() => deleteCourse(course.id)} style={{
-                      background: '#fee2e2', color: '#dc2626', border: 'none', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', fontSize: '0.8rem'
-                    }}>
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* COURSE DETAILS */}
         {activeTab === 'courses' && selectedCourse && (
-          <div>
-            <button onClick={() => { setSelectedCourse(null); setCourseMaterials([]); }} style={{
-              background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500', marginBottom: '1rem'
-            }}>
+          <div className="admin-tab-content">
+            <button
+              className="admin-btn-back"
+              onClick={() => { setSelectedCourse(null); setCourseMaterials([]); }}
+            >
               ← Back to Courses
             </button>
-            <h2 style={{ color: 'var(--text-h)', marginBottom: '1.5rem' }}>{selectedCourse.name}</h2>
+            <h2>{selectedCourse.name}</h2>
 
             {/* Enrolled Students */}
-            <div style={{ marginBottom: '2rem' }}>
-              <h3 style={{ color: 'var(--text-h)', marginBottom: '1rem' }}>Enrolled Students ({selectedCourse.enrollments.length})</h3>
+            <div className="admin-section">
+              <h3>👥 Enrolled Students ({selectedCourse.enrollments.length})</h3>
               {selectedCourse.enrollments.length === 0 ? (
-                <p style={{ color: 'var(--text-h)' }}>No students enrolled</p>
+                <p>No students enrolled</p>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table className="admin-table">
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-h)', fontWeight: '600' }}>Name</th>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-h)', fontWeight: '600' }}>Email</th>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-h)', fontWeight: '600' }}>Action</th>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedCourse.enrollments.map(e => (
-                      <tr key={e.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '0.75rem', color: 'var(--text)' }}>{e.user.name}</td>
-                        <td style={{ padding: '0.75rem', color: 'var(--text)' }}>{e.user.email}</td>
-                        <td style={{ padding: '0.75rem' }}>
-                          <button onClick={() => deleteEnrollment(e.id)} style={{
-                            background: '#fee2e2', color: '#dc2626', border: 'none', padding: '0.35rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem'
-                          }}>
+                      <tr key={e.id}>
+                        <td>{e.user.name}</td>
+                        <td>{e.user.email}</td>
+                        <td>
+                          <button
+                            className="admin-btn admin-btn-small admin-btn-danger"
+                            onClick={() => deleteEnrollment(e.id)}
+                          >
                             Remove
                           </button>
                         </td>
@@ -323,30 +359,33 @@ export default function AdminDashboard() {
             </div>
 
             {/* Materials */}
-            <div>
-              <h3 style={{ color: 'var(--text-h)', marginBottom: '1rem' }}>Course Materials ({courseMaterials.length})</h3>
+            <div className="admin-section">
+              <h3>📄 Course Materials ({courseMaterials.length})</h3>
               {courseMaterials.length === 0 ? (
-                <p style={{ color: 'var(--text-h)' }}>No materials uploaded</p>
+                <p>No materials uploaded</p>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table className="admin-table">
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-h)', fontWeight: '600' }}>Title</th>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-h)', fontWeight: '600' }}>Type</th>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-h)', fontWeight: '600' }}>Chunks</th>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', color: 'var(--text-h)', fontWeight: '600' }}>Action</th>
+                    <tr>
+                      <th>Title</th>
+                      <th>Type</th>
+                      <th>Chunks</th>
+                      <th>Uploaded</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {courseMaterials.map(m => (
-                      <tr key={m.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: '0.75rem', color: 'var(--text)' }}>{m.title}</td>
-                        <td style={{ padding: '0.75rem', color: 'var(--text)' }}>{m.type}</td>
-                        <td style={{ padding: '0.75rem', color: 'var(--text)' }}>{m.chunkCount}</td>
-                        <td style={{ padding: '0.75rem' }}>
-                          <button onClick={() => deleteMaterial(m.id)} style={{
-                            background: '#fee2e2', color: '#dc2626', border: 'none', padding: '0.35rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem'
-                          }}>
+                      <tr key={m.id}>
+                        <td>{m.title}</td>
+                        <td><span className="admin-type-badge">{m.type}</span></td>
+                        <td>{m.chunkCount}</td>
+                        <td>{new Date(m.createdAt).toLocaleDateString()}</td>
+                        <td>
+                          <button
+                            className="admin-btn admin-btn-small admin-btn-danger"
+                            onClick={() => deleteMaterial(m.id)}
+                          >
                             Delete
                           </button>
                         </td>
@@ -361,114 +400,133 @@ export default function AdminDashboard() {
 
         {/* MATERIALS TAB */}
         {activeTab === 'materials' && (
-          <div>
-            <h2 style={{ color: 'var(--text-h)', marginBottom: '1.5rem' }}>Upload Materials</h2>
-            <div style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border)',
-              borderRadius: '12px',
-              padding: '2rem',
-            }}>
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', color: 'var(--text-h)', fontWeight: '500', marginBottom: '0.5rem' }}>Select Course</label>
-                <select value={uploadCourseId} onChange={(e) => setUploadCourseId(e.target.value)} style={{
-                  width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: '0.95rem'
-                }}>
+          <div className="admin-tab-content">
+            <h2>Upload Materials</h2>
+            <div className="admin-upload-form">
+              <div className="admin-form-group">
+                <label className="admin-form-label">Select Course</label>
+                <select
+                  value={uploadCourseId}
+                  onChange={(e) => setUploadCourseId(e.target.value)}
+                  className="admin-form-select"
+                >
                   <option value="">Choose a course...</option>
                   {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', color: 'var(--text-h)', fontWeight: '500', marginBottom: '0.5rem' }}>Upload File (PDF, TXT, etc.)</label>
-                <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0])} style={{
-                  width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)'
-                }} />
+
+              <div className="admin-form-group">
+                <label className="admin-form-label">Upload File (PDF, TXT, DOCX, etc.)</label>
+                <input
+                  type="file"
+                  onChange={(e) => setUploadFile(e.target.files?.[0])}
+                  className="admin-form-input"
+                />
               </div>
-              <button style={{
-                width: '100%', padding: '0.75rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '0.95rem'
-              }}>
-                Upload Material
+
+              <button
+                onClick={handleUploadMaterial}
+                disabled={loading}
+                className="admin-btn admin-btn-upload"
+              >
+                {loading ? 'Uploading...' : 'Upload Material'}
               </button>
-              <p style={{ color: 'var(--text-h)', fontSize: '0.8rem', marginTop: '1rem' }}>💡 Upload any course material (PDF, Word, PowerPoint, etc.) to add to a course.</p>
+
+              <p className="admin-form-hint">
+                💡 Upload any course material (PDF, Word, PowerPoint, Text files, etc.) to add to a course.
+              </p>
             </div>
           </div>
         )}
 
         {/* ENROLLMENTS TAB */}
         {activeTab === 'enrollments' && (
-          <div>
-            <h2 style={{ color: 'var(--text-h)', marginBottom: '1.5rem' }}>Student Enrollments</h2>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                  <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-h)', fontWeight: '600' }}>Student</th>
-                  <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-h)', fontWeight: '600' }}>Email</th>
-                  <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-h)', fontWeight: '600' }}>Course</th>
-                  <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-h)', fontWeight: '600' }}>Enrolled Date</th>
-                  <th style={{ textAlign: 'left', padding: '1rem', color: 'var(--text-h)', fontWeight: '600' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {enrollments.map(e => (
-                  <tr key={e.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '1rem', color: 'var(--text)' }}>{e.user.name}</td>
-                    <td style={{ padding: '1rem', color: 'var(--text)' }}>{e.user.email}</td>
-                    <td style={{ padding: '1rem', color: 'var(--text)' }}>{e.course.name}</td>
-                    <td style={{ padding: '1rem', color: 'var(--text)' }}>{new Date(e.createdAt).toLocaleDateString()}</td>
-                    <td style={{ padding: '1rem' }}>
-                      <button onClick={() => deleteEnrollment(e.id)} style={{
-                        background: '#fee2e2', color: '#dc2626', border: 'none', padding: '0.35rem 0.75rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '600'
-                      }}>
-                        Remove
-                      </button>
-                    </td>
+          <div className="admin-tab-content">
+            <h2>Student Enrollments</h2>
+            {enrollments.length === 0 ? (
+              <p>No enrollments found</p>
+            ) : (
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Email</th>
+                    <th>Course</th>
+                    <th>Enrolled Date</th>
+                    <th>Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {enrollments.map(e => (
+                    <tr key={e.id}>
+                      <td>{e.user.name}</td>
+                      <td>{e.user.email}</td>
+                      <td>{e.course.name}</td>
+                      <td>{new Date(e.createdAt).toLocaleDateString()}</td>
+                      <td>
+                        <button
+                          className="admin-btn admin-btn-small admin-btn-danger"
+                          onClick={() => deleteEnrollment(e.id)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
         {/* EDIT COURSE MODAL */}
         {editingCourse && (
-          <div style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-          }}>
-            <div style={{
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '12px', padding: '2rem', maxWidth: '500px', width: '90%'
-            }}>
-              <h3 style={{ color: 'var(--text-h)', marginBottom: '1.5rem' }}>Edit Course</h3>
-              <input type="text" placeholder="Course Name" defaultValue={editingCourse.name} id="editName" style={{
-                width: '100%', padding: '0.75rem', marginBottom: '1rem', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', boxSizing: 'border-box'
-              }} />
-              <input type="text" placeholder="Subject" defaultValue={editingCourse.subject} id="editSubject" style={{
-                width: '100%', padding: '0.75rem', marginBottom: '1rem', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', boxSizing: 'border-box'
-              }} />
-              <textarea placeholder="Description" defaultValue={editingCourse.description} id="editDesc" style={{
-                width: '100%', padding: '0.75rem', marginBottom: '1.5rem', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', boxSizing: 'border-box', minHeight: '100px'
-              }} />
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <button onClick={() => {
-                  updateCourse(editingCourse.id, {
-                    name: document.getElementById('editName').value,
-                    subject: document.getElementById('editSubject').value,
-                    description: document.getElementById('editDesc').value
-                  });
-                }} style={{
-                  flex: 1, padding: '0.75rem', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600'
-                }}>
+          <div className="admin-modal-overlay">
+            <div className="admin-modal">
+              <h3>Edit Course</h3>
+              <input
+                type="text"
+                placeholder="Course Name"
+                defaultValue={editingCourse.name}
+                id="editName"
+                className="admin-form-input"
+              />
+              <input
+                type="text"
+                placeholder="Subject"
+                defaultValue={editingCourse.subject}
+                id="editSubject"
+                className="admin-form-input"
+              />
+              <textarea
+                placeholder="Description"
+                defaultValue={editingCourse.description}
+                id="editDesc"
+                className="admin-form-input"
+              ></textarea>
+              <div className="admin-modal-actions">
+                <button
+                  onClick={() => {
+                    updateCourse(editingCourse.id, {
+                      name: document.getElementById('editName').value,
+                      subject: document.getElementById('editSubject').value,
+                      description: document.getElementById('editDesc').value
+                    });
+                  }}
+                  className="admin-btn admin-btn-primary"
+                >
                   Save
                 </button>
-                <button onClick={() => setEditingCourse(null)} style={{
-                  flex: 1, padding: '0.75rem', background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer', fontWeight: '600'
-                }}>
+                <button
+                  onClick={() => setEditingCourse(null)}
+                  className="admin-btn admin-btn-secondary"
+                >
                   Cancel
                 </button>
               </div>
             </div>
           </div>
         )}
-
       </main>
     </div>
   );
