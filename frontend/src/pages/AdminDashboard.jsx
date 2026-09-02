@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../api/axios';  // ✅ Use the configured axios instance
 import './AdminDashboard.css';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('courses');
@@ -15,15 +13,11 @@ export default function AdminDashboard() {
   const [courseMaterials, setCourseMaterials] = useState([]);
   const [editingCourse, setEditingCourse] = useState(null);
 
-  const token = localStorage.getItem('token');
-
   // Fetch all courses
   const fetchCourses = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/api/admin/courses`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get('/admin/courses');  // ✅ Just the endpoint path
       setCourses(response.data.courses);
       setMessage('✅ Courses loaded');
     } catch (err) {
@@ -36,15 +30,10 @@ export default function AdminDashboard() {
   const fetchCourseDetails = async (courseId) => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/api/admin/course/${courseId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get(`/admin/course/${courseId}`);
       setSelectedCourse(response.data.course);
 
-      const materialsRes = await axios.get(
-        `${API_URL}/api/admin/course/${courseId}/materials`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const materialsRes = await api.get(`/admin/course/${courseId}/materials`);
       setCourseMaterials(materialsRes.data.materials);
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
@@ -56,9 +45,7 @@ export default function AdminDashboard() {
   const fetchEnrollments = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/api/admin/enrollments`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get('/admin/enrollments');
       setEnrollments(response.data.enrollments);
       setMessage('✅ Enrollments loaded');
     } catch (err) {
@@ -71,9 +58,7 @@ export default function AdminDashboard() {
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/api/admin/stats`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get('/admin/stats');
       setStats(response.data.stats);
       setMessage('✅ Stats loaded');
     } catch (err) {
@@ -90,9 +75,7 @@ export default function AdminDashboard() {
 
     setLoading(true);
     try {
-      const response = await axios.delete(`${API_URL}/api/admin/course/${courseId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.delete(`/admin/course/${courseId}`);
       setMessage(`✅ ${response.data.message}`);
       fetchCourses();
     } catch (err) {
@@ -105,11 +88,7 @@ export default function AdminDashboard() {
   const updateCourse = async (courseId, courseData) => {
     setLoading(true);
     try {
-      const response = await axios.put(
-        `${API_URL}/api/admin/course/${courseId}`,
-        courseData,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const response = await api.put(`/admin/course/${courseId}`, courseData);
       setMessage(`✅ ${response.data.message}`);
       setEditingCourse(null);
       fetchCourses();
@@ -127,9 +106,7 @@ export default function AdminDashboard() {
 
     setLoading(true);
     try {
-      const response = await axios.delete(`${API_URL}/api/admin/material/${materialId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.delete(`/admin/material/${materialId}`);
       setMessage(`✅ ${response.data.message}`);
       if (selectedCourse) {
         fetchCourseDetails(selectedCourse.id);
@@ -148,9 +125,7 @@ export default function AdminDashboard() {
 
     setLoading(true);
     try {
-      const response = await axios.delete(`${API_URL}/api/admin/enrollment/${enrollmentId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.delete(`/admin/enrollment/${enrollmentId}`);
       setMessage(`✅ ${response.data.message}`);
       fetchEnrollments();
       if (selectedCourse) {
