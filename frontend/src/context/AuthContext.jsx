@@ -5,28 +5,35 @@ export const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);
+  const [token, setToken]     = useState(null);  // ✅ ADD THIS
   const [loading, setLoading] = useState(true);
 
   // On app load, check if token exists and fetch user
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
+    const storedToken = localStorage.getItem('token');
+    if (storedToken) {
+      setToken(storedToken);  // ✅ ADD THIS
       api.get('/auth/me')
         .then((res) => setUser(res.data))
-        .catch(() => localStorage.removeItem('token'))
+        .catch(() => {
+          localStorage.removeItem('token');
+          setToken(null);  // ✅ ADD THIS
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
   }, []);
 
-  const login = (token, userData) => {
-    localStorage.setItem('token', token);
+  const login = (newToken, userData) => {
+    localStorage.setItem('token', newToken);
+    setToken(newToken);  // ✅ ADD THIS
     setUser(userData);
   };
 
   const logout = () => {
     localStorage.removeItem('token');
+    setToken(null);  // ✅ ADD THIS
     setUser(null);
     window.location.href = '/login';
   };
@@ -40,7 +47,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, token, login, logout }}>  {/* ✅ ADD token HERE */}
       {children}
     </AuthContext.Provider>
   );
