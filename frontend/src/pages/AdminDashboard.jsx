@@ -8,24 +8,28 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { logout } = useAuth();
 
-  const [activeTab, setActiveTab] = useState('overview');
   const [courses, setCourses] = useState([]);
-  const [allMaterials, setAllMaterials] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [materials, setMaterials] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [stats, setStats] = useState(null);
+
+  const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+
+  const [newCourse, setNewCourse] = useState({ name: '', subject: '' });
+  const [enrollForm, setEnrollForm] = useState({ userId: '', courseId: '' });
   const [selectedCourse, setSelectedCourse] = useState(null);
-  const [courseMaterials, setCourseMaterials] = useState([]);
   const [editingCourse, setEditingCourse] = useState(null);
 
   // ── Fetch stats ────────────────────────────────────────
   const fetchStats = async () => {
     try {
       const response = await api.get('/admin/stats');
-      setStats(response.data.stats);
+      setStats(response.data);
     } catch (err) {
-      setMessage(`❌ Error loading stats: ${err.message}`);
+      console.error('Stats error:', err);
     }
   };
 
@@ -34,7 +38,7 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const response = await api.get('/admin/courses');
-      setCourses(response.data.courses);
+      setCourses(response.data);
       setMessage('✅ Courses loaded');
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
@@ -42,27 +46,12 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Fetch course details (materials + enrollments) ────────────
-  const fetchCourseDetails = async (courseId) => {
+  // ── Fetch all materials ──────────────────────────────────────
+  const fetchMaterials = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`/admin/course/${courseId}`);
-      setSelectedCourse(response.data.course);
-
-      const materialsRes = await api.get(`/admin/course/${courseId}/materials`);
-      setCourseMaterials(materialsRes.data.materials);
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // ── Fetch ALL materials ──────────────────────────────────────
-  const fetchAllMaterials = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/admin/materials');
-      setAllMaterials(response.data.materials);
+      const response = await api.get('/materials');
+      setMaterials(response.data);
       setMessage('✅ Materials loaded');
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
@@ -75,8 +64,50 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const response = await api.get('/admin/enrollments');
-      setEnrollments(response.data.enrollments);
+      setEnrollments(response.data);
       setMessage('✅ Enrollments loaded');
+    } catch (err) {
+      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
+    }
+    setLoading(false);
+  };
+
+  // ── Fetch users ──────────────────────────────────────
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/admin/users');
+      setUsers(response.data);
+    } catch (err) {
+      console.error('Users error:', err);
+    }
+  };
+
+  // ── Create course ──────────────────────────────────────
+  const createCourse = async (e) => {
+    e.preventDefault();
+    if (!newCourse.name) return;
+    setLoading(true);
+    try {
+      await api.post('/admin/courses', newCourse);
+      setMessage('✅ Course created successfully');
+      setNewCourse({ name: '', subject: '' });
+      fetchCourses();
+    } catch (err) {
+      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
+    }
+    setLoading(false);
+  };
+
+  // ── Enroll student ──────────────────────────────────────
+  const enrollStudent = async (e) => {
+    e.preventDefault();
+    if (!enrollForm.userId || !enrollForm.courseId) return;
+    setLoading(true);
+    try {
+      await api.post('/admin/enroll', enrollForm);
+      setMessage('✅ Student enrolled successfully');
+      setEnrollForm({ userId: '', courseId: '' });
+      fetchEnrollments();
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
     }
@@ -85,14 +116,11 @@ export default function AdminDashboard() {
 
   // ── Delete course ──────────────────────────────────────
   const deleteCourse = async (courseId) => {
-    if (!window.confirm('⚠️ This will delete the entire course, all materials, and enrollments. Continue?')) {
-      return;
-    }
-
+    if (!window.confirm('Delete this course and all its data?')) return;
     setLoading(true);
     try {
-      const response = await api.delete(`/admin/course/${courseId}`);
-      setMessage(`✅ ${response.data.message}`);
+      await api.delete(`/admin/courses/${courseId}`);
+      setMessage('✅ Course deleted');
       fetchCourses();
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
@@ -100,12 +128,12 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Edit course ────────────────────────────────────────
-  const updateCourse = async (courseId, courseData) => {
+  // ── Update course ──────────────────────────────────────
+  const updateCourse = async (courseId, data) => {
     setLoading(true);
     try {
-      const response = await api.put(`/admin/course/${courseId}`, courseData);
-      setMessage(`✅ ${response.data.message}`);
+      await api.put(`/admin/courses/${courseId}`, data);
+      setMessage('✅ Course updated');
       setEditingCourse(null);
       fetchCourses();
     } catch (err) {
@@ -114,52 +142,33 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Delete material ────────────────────────────────────────
+  // ── Delete material ──────────────────────────────────────
   const deleteMaterial = async (materialId) => {
-    if (!window.confirm('⚠️ Delete this material and all its chunks?')) {
-      return;
-    }
-
+    if (!window.confirm('Delete this material?')) return;
     setLoading(true);
     try {
-      const response = await api.delete(`/admin/material/${materialId}`);
-      setMessage(`✅ ${response.data.message}`);
-      fetchAllMaterials();
-      if (selectedCourse) {
-        fetchCourseDetails(selectedCourse.id);
-      }
+      await api.delete(`/materials/${materialId}`);
+      setMessage('✅ Material deleted');
+      fetchMaterials();
     } catch (err) {
       setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
     }
     setLoading(false);
   };
 
-  // ── Delete enrollment (remove student) ──────────────────────────
-  const deleteEnrollment = async (enrollmentId) => {
-    if (!window.confirm('⚠️ Remove this student from the course?')) {
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await api.delete(`/admin/enrollment/${enrollmentId}`);
-      setMessage(`✅ ${response.data.message}`);
-      fetchEnrollments();
-      if (selectedCourse) {
-        fetchCourseDetails(selectedCourse.id);
-      }
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // ── Load initial data ──────────────────────────────────────
+  // ── Load data on tab change ────────────────────────────────
   useEffect(() => {
-    if (activeTab === 'overview') fetchStats();
-    if (activeTab === 'courses') fetchCourses();
-    if (activeTab === 'materials') fetchAllMaterials();
-    if (activeTab === 'enrollments') fetchEnrollments();
+    if (activeTab === 'overview') {
+      fetchStats();
+      fetchCourses();
+      fetchUsers();
+    } else if (activeTab === 'courses') {
+      fetchCourses();
+    } else if (activeTab === 'materials') {
+      fetchMaterials();
+    } else if (activeTab === 'enrollments') {
+      fetchEnrollments();
+    }
   }, [activeTab]);
 
   return (
@@ -175,10 +184,10 @@ export default function AdminDashboard() {
             <span className="admin-navbar-title">🛠️ Admin Dashboard</span>
           </div>
           <div className="admin-navbar-right">
-            <button onClick={() => navigate('/upload')} className="admin-nav-btn admin-nav-accent">
+            <button onClick={() => navigate('/admin/upload')} className="admin-nav-btn admin-nav-accent">
               📤 Upload Materials
             </button>
-            <button onClick={() => navigate('/analytics')} className="admin-nav-btn admin-nav-accent">
+            <button onClick={() => navigate('/admin/analytics')} className="admin-nav-btn admin-nav-accent">
               📊 Analytics
             </button>
             <button onClick={logout} className="admin-nav-btn admin-nav-logout">
@@ -237,14 +246,14 @@ export default function AdminDashboard() {
             <h2>Dashboard Overview</h2>
             <div className="admin-stats-grid">
               {[
-                { label: 'Total Users', value: stats.users, icon: '👥' },
-                { label: 'Courses', value: stats.courses, icon: '📚' },
-                { label: 'Enrollments', value: stats.enrollments, icon: '📝' },
-                { label: 'Materials', value: stats.materials, icon: '📄' },
-                { label: 'Document Chunks', value: stats.chunks, icon: '🔍' },
-                { label: 'Chat Sessions', value: stats.chatSessions, icon: '💬' },
-                { label: 'Messages', value: stats.messages, icon: '💭' },
-                { label: 'Bookmarks', value: stats.bookmarks, icon: '🔖' },
+                { label: 'Total Users', value: stats.users || users.length, icon: '👥' },
+                { label: 'Courses', value: stats.courses || courses.length, icon: '📚' },
+                { label: 'Enrollments', value: stats.enrollments || enrollments.length, icon: '📝' },
+                { label: 'Materials', value: stats.materials || materials.length, icon: '📄' },
+                { label: 'Document Chunks', value: stats.chunks || 0, icon: '🔍' },
+                { label: 'Chat Sessions', value: stats.chatSessions || 0, icon: '💬' },
+                { label: 'Messages', value: stats.messages || 0, icon: '💭' },
+                { label: 'Bookmarks', value: stats.bookmarks || 0, icon: '🔖' },
               ].map((stat, i) => (
                 <div key={i} className="admin-stat-card">
                   <div className="admin-stat-icon">{stat.icon}</div>
@@ -257,32 +266,51 @@ export default function AdminDashboard() {
         )}
 
         {/* COURSES TAB */}
-        {activeTab === 'courses' && !selectedCourse && (
+        {activeTab === 'courses' && (
           <div className="admin-tab-content">
             <h2>Manage Courses</h2>
+
+            {/* Create Course Form */}
+            <div className="admin-form-section">
+              <h3>Create New Course</h3>
+              <form onSubmit={createCourse} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <input
+                  value={newCourse.name}
+                  onChange={(e) => setNewCourse({ ...newCourse, name: e.target.value })}
+                  placeholder="Course name"
+                  className="admin-form-input"
+                  required
+                  style={{ flex: 1, minWidth: '200px' }}
+                />
+                <input
+                  value={newCourse.subject}
+                  onChange={(e) => setNewCourse({ ...newCourse, subject: e.target.value })}
+                  placeholder="Subject"
+                  className="admin-form-input"
+                  style={{ flex: 1, minWidth: '150px' }}
+                />
+                <button type="submit" disabled={loading} className="admin-btn admin-btn-primary">
+                  {loading ? 'Creating...' : '+ Create'}
+                </button>
+              </form>
+            </div>
+
+            {/* Courses List */}
             {courses.length === 0 ? (
               <p>No courses found</p>
             ) : (
               <div className="admin-courses-list">
-                {courses.map(course => (
+                {courses.map((course) => (
                   <div key={course.id} className="admin-course-card">
                     <div className="admin-course-info">
                       <h3>{course.name}</h3>
                       <p className="admin-subject">{course.subject}</p>
-                      <p className="admin-description">{course.description}</p>
                       <div className="admin-course-stats">
-                        <span>👥 {course.studentCount} students</span>
-                        <span>📄 {course.materialCount} materials</span>
-                        <span>📅 {new Date(course.createdAt).toLocaleDateString()}</span>
+                        <span>👥 {course._count?.enrollments || 0} students</span>
+                        <span>📄 {course._count?.materials || 0} materials</span>
                       </div>
                     </div>
                     <div className="admin-course-actions">
-                      <button
-                        className="admin-btn admin-btn-primary"
-                        onClick={() => fetchCourseDetails(course.id)}
-                      >
-                        View Details
-                      </button>
                       <button
                         className="admin-btn admin-btn-secondary"
                         onClick={() => setEditingCourse(course)}
@@ -303,105 +331,20 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* COURSE DETAILS */}
-        {activeTab === 'courses' && selectedCourse && (
-          <div className="admin-tab-content">
-            <button
-              className="admin-btn-back"
-              onClick={() => { setSelectedCourse(null); setCourseMaterials([]); }}
-            >
-              ← Back to Courses
-            </button>
-            <h2>{selectedCourse.name}</h2>
-
-            {/* Enrolled Students */}
-            <div className="admin-section">
-              <h3>👥 Enrolled Students ({selectedCourse.enrollments.length})</h3>
-              {selectedCourse.enrollments.length === 0 ? (
-                <p>No students enrolled</p>
-              ) : (
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedCourse.enrollments.map(e => (
-                      <tr key={e.id}>
-                        <td>{e.user.name}</td>
-                        <td>{e.user.email}</td>
-                        <td>
-                          <button
-                            className="admin-btn admin-btn-small admin-btn-danger"
-                            onClick={() => deleteEnrollment(e.id)}
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Materials in This Course */}
-            <div className="admin-section">
-              <h3>📄 Course Materials ({courseMaterials.length})</h3>
-              {courseMaterials.length === 0 ? (
-                <p>No materials uploaded</p>
-              ) : (
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>Title</th>
-                      <th>Type</th>
-                      <th>Chunks</th>
-                      <th>Uploaded</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {courseMaterials.map(m => (
-                      <tr key={m.id}>
-                        <td>{m.title}</td>
-                        <td><span className="admin-type-badge">{m.type}</span></td>
-                        <td>{m.chunkCount}</td>
-                        <td>{new Date(m.createdAt).toLocaleDateString()}</td>
-                        <td>
-                          <button
-                            className="admin-btn admin-btn-small admin-btn-danger"
-                            onClick={() => deleteMaterial(m.id)}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* MATERIALS TAB - Show ALL Materials */}
+        {/* MATERIALS TAB */}
         {activeTab === 'materials' && (
           <div className="admin-tab-content">
             <div className="admin-materials-header">
               <h2>All Course Materials</h2>
               <button
                 className="admin-btn admin-btn-primary"
-                onClick={() => navigate('/upload')}
+                onClick={() => navigate('/admin/upload')}
               >
                 📤 Upload New Material
               </button>
             </div>
 
-            {allMaterials.length === 0 ? (
+            {materials.length === 0 ? (
               <p>No materials found</p>
             ) : (
               <table className="admin-table">
@@ -410,19 +353,17 @@ export default function AdminDashboard() {
                     <th>Title</th>
                     <th>Course</th>
                     <th>Type</th>
-                    <th>Chunks</th>
                     <th>Uploaded Date</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allMaterials.map(m => (
+                  {materials.map((m) => (
                     <tr key={m.id}>
                       <td>{m.title}</td>
-                      <td>{m.course?.name || 'Unknown Course'}</td>
-                      <td><span className="admin-type-badge">{m.type}</span></td>
-                      <td>{m.chunkCount}</td>
-                      <td>{new Date(m.createdAt).toLocaleDateString()}</td>
+                      <td>{m.course?.name || 'Unknown'}</td>
+                      <td><span className="admin-type-badge">{m.type || 'PDF'}</span></td>
+                      <td>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : 'N/A'}</td>
                       <td>
                         <button
                           className="admin-btn admin-btn-small admin-btn-danger"
@@ -442,40 +383,72 @@ export default function AdminDashboard() {
         {/* ENROLLMENTS TAB */}
         {activeTab === 'enrollments' && (
           <div className="admin-tab-content">
-            <h2>Student Enrollments</h2>
-            {enrollments.length === 0 ? (
-              <p>No enrollments found</p>
-            ) : (
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Student</th>
-                    <th>Email</th>
-                    <th>Course</th>
-                    <th>Enrolled Date</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {enrollments.map(e => (
-                    <tr key={e.id}>
-                      <td>{e.user.name}</td>
-                      <td>{e.user.email}</td>
-                      <td>{e.course.name}</td>
-                      <td>{new Date(e.createdAt).toLocaleDateString()}</td>
-                      <td>
-                        <button
-                          className="admin-btn admin-btn-small admin-btn-danger"
-                          onClick={() => deleteEnrollment(e.id)}
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+              {/* Enroll Form */}
+              <div className="admin-form-section">
+                <h3>Enroll Student</h3>
+                <form onSubmit={enrollStudent} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label>Student</label>
+                    <select
+                      value={enrollForm.userId}
+                      onChange={(e) => setEnrollForm({ ...enrollForm, userId: e.target.value })}
+                      className="admin-form-input"
+                      required
+                    >
+                      <option value="">Select student...</option>
+                      {users.filter(u => u.role !== 'ADMIN').map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Course</label>
+                    <select
+                      value={enrollForm.courseId}
+                      onChange={(e) => setEnrollForm({ ...enrollForm, courseId: e.target.value })}
+                      className="admin-form-input"
+                      required
+                    >
+                      <option value="">Select course...</option>
+                      {courses.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button type="submit" disabled={loading} className="admin-btn admin-btn-primary">
+                    {loading ? 'Enrolling...' : 'Enroll Student'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Enrollments List */}
+              <div>
+                <h3>All Enrollments ({enrollments.length})</h3>
+                {enrollments.length === 0 ? (
+                  <p>No enrollments found</p>
+                ) : (
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Student</th>
+                        <th>Course</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {enrollments.map((e) => (
+                        <tr key={e.id}>
+                          <td>{e.user?.name || 'Unknown'}</td>
+                          <td>{e.course?.name || 'Unknown'}</td>
+                          <td>{e.createdAt ? new Date(e.createdAt).toLocaleDateString() : 'N/A'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -498,19 +471,12 @@ export default function AdminDashboard() {
                 id="editSubject"
                 className="admin-form-input"
               />
-              <textarea
-                placeholder="Description"
-                defaultValue={editingCourse.description}
-                id="editDesc"
-                className="admin-form-input"
-              ></textarea>
               <div className="admin-modal-actions">
                 <button
                   onClick={() => {
                     updateCourse(editingCourse.id, {
                       name: document.getElementById('editName').value,
                       subject: document.getElementById('editSubject').value,
-                      description: document.getElementById('editDesc').value
                     });
                   }}
                   className="admin-btn admin-btn-primary"
