@@ -1,9 +1,3 @@
-// ============================================================
-// AdminDashboard.jsx — Admin Panel with Full CRUD Operations
-// ============================================================
-// Delete/Edit courses, materials, and manage student enrollments
-// ============================================================
-
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './AdminDashboard.css';
@@ -11,7 +5,7 @@ import './AdminDashboard.css';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState('courses'); // courses | materials | enrollments | stats
+  const [activeTab, setActiveTab] = useState('courses');
   const [courses, setCourses] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [stats, setStats] = useState(null);
@@ -23,7 +17,7 @@ export default function AdminDashboard() {
 
   const token = localStorage.getItem('token');
 
-  // ── Fetch all courses ──────────────────────────────────────
+  // Fetch all courses
   const fetchCourses = async () => {
     setLoading(true);
     try {
@@ -38,7 +32,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Fetch course details (materials + enrollments) ────────────
+  // Fetch course details
   const fetchCourseDetails = async (courseId) => {
     setLoading(true);
     try {
@@ -47,7 +41,6 @@ export default function AdminDashboard() {
       });
       setSelectedCourse(response.data.course);
 
-      // Fetch materials
       const materialsRes = await axios.get(
         `${API_URL}/api/admin/course/${courseId}/materials`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -59,7 +52,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Fetch enrollments ──────────────────────────────────────
+  // Fetch enrollments
   const fetchEnrollments = async () => {
     setLoading(true);
     try {
@@ -74,7 +67,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Fetch stats ────────────────────────────────────────
+  // Fetch stats
   const fetchStats = async () => {
     setLoading(true);
     try {
@@ -89,7 +82,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Delete course ──────────────────────────────────────
+  // Delete course
   const deleteCourse = async (courseId) => {
     if (!window.confirm('⚠️ This will delete the entire course, all materials, and enrollments. Continue?')) {
       return;
@@ -108,7 +101,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Edit course ────────────────────────────────────────
+  // Update course
   const updateCourse = async (courseId, courseData) => {
     setLoading(true);
     try {
@@ -126,7 +119,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Delete material ────────────────────────────────────────
+  // Delete material
   const deleteMaterial = async (materialId) => {
     if (!window.confirm('⚠️ Delete this material and all its chunks?')) {
       return;
@@ -147,7 +140,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Delete enrollment (remove student) ──────────────────────────
+  // Delete enrollment
   const deleteEnrollment = async (enrollmentId) => {
     if (!window.confirm('⚠️ Remove this student from the course?')) {
       return;
@@ -169,7 +162,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  // ── Load initial data ──────────────────────────────────────
+  // Load initial data
   useEffect(() => {
     if (activeTab === 'courses') fetchCourses();
     if (activeTab === 'enrollments') fetchEnrollments();
@@ -180,7 +173,6 @@ export default function AdminDashboard() {
     <div className="admin-dashboard">
       <h1>🛠️ Admin Dashboard</h1>
 
-      {/* Message Alert */}
       {message && (
         <div className="alert">
           {message}
@@ -188,7 +180,6 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="tabs">
         <button
           className={activeTab === 'courses' ? 'tab active' : 'tab'}
@@ -210,7 +201,6 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* Loading */}
       {loading && <div className="loading">Loading...</div>}
 
       {/* COURSES TAB */}
