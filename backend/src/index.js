@@ -21,13 +21,13 @@ app.use('/api/auth',      require('./routes/auth'));
 app.use('/api/courses',   require('./routes/courses'));
 app.use('/api/chat',      require('./routes/chat'));
 app.use('/api/materials', require('./routes/materials'));
-app.use('/api/admin',     require('./routes/admin'));
+app.use('/api/admin',     require('./routes/admin'));        // ✅ CRUD operations
 app.use('/api/feedback',   require('./routes/feedback'));
 app.use('/api/bookmarks',  require('./routes/bookmarks'));
 app.use('/api/quiz',       require('./routes/quiz'));
 app.use('/api/flashcards', require('./routes/flashcards'));
-app.use('/api/admin', require('./routes/analytics'));
-app.use('/api/profile', require('./routes/profile'));
+app.use('/api/analytics',  require('./routes/analytics'));   // ✅ Changed!
+app.use('/api/profile',    require('./routes/profile'));
 app.use('/api/notifications', require('./routes/notifications'));
 // ── Health Check ─────────────────────────────────────
 app.get('/', (req, res) => {
