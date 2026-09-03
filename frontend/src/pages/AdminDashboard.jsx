@@ -1,496 +1,219 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
-import './AdminDashboard.css';
 
 export default function AdminDashboard() {
+  const [courses, setCourses]       = useState([]);
+  const [users, setUsers]           = useState([]);
+  const [newCourse, setNewCourse]   = useState({ name:'', subject:'' });
+  const [enrollForm, setEnrollForm] = useState({ userId:'', courseId:'' });
+  const [activeTab, setActiveTab]   = useState('courses');
+  const [loading, setLoading]       = useState(false);
+  const [toast, setToast]           = useState(null);
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { logout } = useAuth();
 
-  const [courses, setCourses] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [materials, setMaterials] = useState([]);
-  const [enrollments, setEnrollments] = useState([]);
-  const [stats, setStats] = useState(null);
+  useEffect(() => {
+    api.get('/admin/courses').then(r => setCourses(r.data)).catch(console.error);
+    api.get('/admin/users').then(r => setUsers(r.data)).catch(console.error);
+  }, []);
 
-  const [activeTab, setActiveTab] = useState('overview');
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-
-  const [newCourse, setNewCourse] = useState({ name: '', subject: '' });
-  const [enrollForm, setEnrollForm] = useState({ userId: '', courseId: '' });
-  const [selectedCourse, setSelectedCourse] = useState(null);
-  const [editingCourse, setEditingCourse] = useState(null);
-
-  // ── Fetch stats ────────────────────────────────────────
-  const fetchStats = async () => {
-    try {
-      const response = await api.get('/admin/stats');
-      setStats(response.data);
-    } catch (err) {
-      console.error('Stats error:', err);
-    }
+  const showToast = (msg, type='success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
-  // ── Fetch all courses ──────────────────────────────────────
-  const fetchCourses = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/admin/courses');
-      setCourses(response.data);
-      setMessage('✅ Courses loaded');
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // ── Fetch all materials ──────────────────────────────────────
-  const fetchMaterials = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/materials');
-      setMaterials(response.data);
-      setMessage('✅ Materials loaded');
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // ── Fetch enrollments ──────────────────────────────────────
-  const fetchEnrollments = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/admin/enrollments');
-      setEnrollments(response.data);
-      setMessage('✅ Enrollments loaded');
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // ── Fetch users ──────────────────────────────────────
-  const fetchUsers = async () => {
-    try {
-      const response = await api.get('/admin/users');
-      setUsers(response.data);
-    } catch (err) {
-      console.error('Users error:', err);
-    }
-  };
-
-  // ── Create course ──────────────────────────────────────
   const createCourse = async (e) => {
     e.preventDefault();
-    if (!newCourse.name) return;
     setLoading(true);
     try {
-      await api.post('/admin/courses', newCourse);
-      setMessage('✅ Course created successfully');
-      setNewCourse({ name: '', subject: '' });
-      fetchCourses();
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
+      const res = await api.post('/admin/courses', newCourse);
+      setCourses(prev => [...prev, res.data]);
+      setNewCourse({ name:'', subject:'' });
+      showToast('Course created successfully');
+    } catch { showToast('Failed to create course', 'error'); }
+    finally { setLoading(false); }
   };
 
-  // ── Enroll student ──────────────────────────────────────
   const enrollStudent = async (e) => {
     e.preventDefault();
-    if (!enrollForm.userId || !enrollForm.courseId) return;
     setLoading(true);
     try {
       await api.post('/admin/enroll', enrollForm);
-      setMessage('✅ Student enrolled successfully');
-      setEnrollForm({ userId: '', courseId: '' });
-      fetchEnrollments();
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
+      setEnrollForm({ userId:'', courseId:'' });
+      showToast('Student enrolled successfully');
+      api.get('/admin/courses').then(r => setCourses(r.data));
+    } catch { showToast('Failed to enroll student', 'error'); }
+    finally { setLoading(false); }
   };
 
-  // ── Delete course ──────────────────────────────────────
-  const deleteCourse = async (courseId) => {
-    if (!window.confirm('Delete this course and all its data?')) return;
-    setLoading(true);
-    try {
-      await api.delete(`/admin/courses/${courseId}`);
-      setMessage('✅ Course deleted');
-      fetchCourses();
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
+  const tabs = [
+    { id:'courses',  label:'Courses',  count: courses.length },
+    { id:'students', label:'Students', count: users.length },
+    { id:'enroll',   label:'Enroll',   count: null },
+  ];
 
-  // ── Update course ──────────────────────────────────────
-  const updateCourse = async (courseId, data) => {
-    setLoading(true);
-    try {
-      await api.put(`/admin/courses/${courseId}`, data);
-      setMessage('✅ Course updated');
-      setEditingCourse(null);
-      fetchCourses();
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // ── Delete material ──────────────────────────────────────
-  const deleteMaterial = async (materialId) => {
-    if (!window.confirm('Delete this material?')) return;
-    setLoading(true);
-    try {
-      await api.delete(`/materials/${materialId}`);
-      setMessage('✅ Material deleted');
-      fetchMaterials();
-    } catch (err) {
-      setMessage(`❌ Error: ${err.response?.data?.error || err.message}`);
-    }
-    setLoading(false);
-  };
-
-  // ── Load data on tab change ────────────────────────────────
-  useEffect(() => {
-    if (activeTab === 'overview') {
-      fetchStats();
-      fetchCourses();
-      fetchUsers();
-    } else if (activeTab === 'courses') {
-      fetchCourses();
-    } else if (activeTab === 'materials') {
-      fetchMaterials();
-    } else if (activeTab === 'enrollments') {
-      fetchEnrollments();
-    }
-  }, [activeTab]);
+  const inputStyle = { width:'100%', padding:'0.65rem 0.9rem', border:'1px solid #d1d5db', borderRadius:'10px', fontSize:'0.875rem', outline:'none', boxSizing:'border-box', color:'#0f172a', background:'#fff' };
+  const selectStyle = { ...inputStyle, background:'#fff' };
 
   return (
-    <div className="admin-dashboard-container">
+    <div style={{ minHeight:'100vh', background:'#f8fafc', fontFamily:'system-ui,sans-serif' }}>
+
+      {/* Toast */}
+      {toast && (
+        <div style={{ position:'fixed', top:'1rem', right:'1rem', zIndex:999, background: toast.type==='error' ? '#fef2f2' : '#f0fdf4', border:`1px solid ${toast.type==='error' ? '#fecaca' : '#bbf7d0'}`, color: toast.type==='error' ? '#dc2626' : '#16a34a', padding:'0.75rem 1.25rem', borderRadius:'12px', fontSize:'0.875rem', fontWeight:'500', boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }}>
+          {toast.type==='error' ? '⚠️' : '✅'} {toast.msg}
+        </div>
+      )}
+
       {/* Navbar */}
-      <nav className="admin-navbar">
-        <div className="admin-navbar-content">
-          <div className="admin-navbar-left">
-            <button onClick={() => navigate('/')} className="admin-nav-btn">
-              ← Home
-            </button>
-            <span className="admin-nav-divider">|</span>
-            <span className="admin-navbar-title">🛠️ Admin Dashboard</span>
+      <nav style={{ background:'#fff', borderBottom:'1px solid #e2e8f0', padding:'0 1.5rem', position:'sticky', top:0, zIndex:100 }}>
+        <div style={{ maxWidth:'1100px', margin:'0 auto', height:'60px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.625rem' }}>
+            <div style={{ width:'32px', height:'32px', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', borderRadius:'10px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px' }}>📚</div>
+            <span style={{ fontWeight:'700', fontSize:'1rem', color:'#0f172a' }}>Admin Panel</span>
           </div>
-          <div className="admin-navbar-right">
-            <button onClick={() => navigate('/admin/upload')} className="admin-nav-btn admin-nav-accent">
-              📤 Upload Materials
+          <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
+            <button onClick={() => navigate('/admin/upload')} style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)', border:'none', color:'#fff', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'600' }}>
+              ↑ Upload Materials
             </button>
-            <button onClick={() => navigate('/admin/analytics')} className="admin-nav-btn admin-nav-accent">
+            <button onClick={() => navigate('/admin/analytics')} style={{ background:'linear-gradient(135deg,#10b981,#059669)', border:'none', color:'#fff', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'600' }}>
               📊 Analytics
             </button>
-            <button onClick={logout} className="admin-nav-btn admin-nav-logout">
+            <button onClick={() => navigate('/dashboard')} style={{ background:'none', border:'1px solid #e2e8f0', color:'#64748b', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer' }}>
+              Dashboard
+            </button>
+            <button onClick={logout} style={{ background:'#fef2f2', border:'1px solid #fecaca', color:'#dc2626', padding:'0.45rem 0.9rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'500' }}>
               Sign out
             </button>
           </div>
         </div>
       </nav>
 
-      {/* Message Alert */}
-      {message && (
-        <div className="admin-message">
-          <div className="admin-message-content">
-            <span>{message}</span>
-            <button onClick={() => setMessage('')} className="admin-message-close">✕</button>
-          </div>
-        </div>
-      )}
+      <main style={{ maxWidth:'1100px', margin:'0 auto', padding:'2rem 1.5rem' }}>
 
-      {/* Main Content */}
-      <main className="admin-main">
+        {/* Stats */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'1rem', marginBottom:'2rem' }}>
+          {[
+            { label:'Total Courses',     value: courses.length, icon:'📚', color:'#eff6ff' },
+            { label:'Total Students',    value: users.length,   icon:'👥', color:'#f5f3ff' },
+            { label:'Total Enrollments', value: courses.reduce((a,c) => a+(c._count?.enrollments||0), 0), icon:'✅', color:'#ecfdf5' },
+          ].map(s => (
+            <div key={s.label} style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.25rem 1.5rem' }}>
+              <p style={{ color:'#64748b', fontSize:'0.8rem', margin:'0 0 0.5rem' }}>{s.label}</p>
+              <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
+                <span style={{ fontSize:'1.75rem' }}>{s.icon}</span>
+                <span style={{ fontSize:'1.75rem', fontWeight:'700', color:'#0f172a' }}>{s.value}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
         {/* Tabs */}
-        <div className="admin-tabs">
-          <button
-            className={`admin-tab ${activeTab === 'overview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('overview')}
-          >
-            📊 Overview
-          </button>
-          <button
-            className={`admin-tab ${activeTab === 'courses' ? 'active' : ''}`}
-            onClick={() => setActiveTab('courses')}
-          >
-            📚 Courses
-          </button>
-          <button
-            className={`admin-tab ${activeTab === 'materials' ? 'active' : ''}`}
-            onClick={() => setActiveTab('materials')}
-          >
-            📄 Materials
-          </button>
-          <button
-            className={`admin-tab ${activeTab === 'enrollments' ? 'active' : ''}`}
-            onClick={() => setActiveTab('enrollments')}
-          >
-            👥 Enrollments
-          </button>
+        <div style={{ display:'flex', gap:'0.375rem', background:'#f1f5f9', padding:'0.375rem', borderRadius:'12px', width:'fit-content', marginBottom:'1.5rem' }}>
+          {tabs.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              style={{ padding:'0.5rem 1.25rem', borderRadius:'9px', border:'none', fontSize:'0.875rem', fontWeight:'500', cursor:'pointer', background: activeTab===tab.id ? '#fff' : 'none', color: activeTab===tab.id ? '#0f172a' : '#64748b', boxShadow: activeTab===tab.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition:'all 0.15s', display:'flex', alignItems:'center', gap:'0.5rem' }}
+            >
+              {tab.label}
+              {tab.count !== null && (
+                <span style={{ background: activeTab===tab.id ? '#eff6ff' : '#e2e8f0', color: activeTab===tab.id ? '#6366f1' : '#64748b', fontSize:'0.75rem', padding:'0.1rem 0.5rem', borderRadius:'20px' }}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
 
-        {/* Loading */}
-        {loading && <div className="admin-loading">⏳ Loading...</div>}
+        {/* Courses Tab */}
+        {activeTab==='courses' && (
+          <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
+            <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.5rem' }}>
+              <h3 style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 1rem', fontSize:'0.95rem' }}>Create new course</h3>
+              <form onSubmit={createCourse} style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
+                <input value={newCourse.name} onChange={e => setNewCourse({...newCourse,name:e.target.value})} placeholder="Course name (e.g. Studio 5)" required style={{ ...inputStyle, flex:1, minWidth:'200px' }} />
+                <input value={newCourse.subject} onChange={e => setNewCourse({...newCourse,subject:e.target.value})} placeholder="Subject" style={{ ...inputStyle, flex:1, minWidth:'150px' }} />
+                <button type="submit" disabled={loading} style={{ padding:'0.65rem 1.25rem', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff', border:'none', borderRadius:'10px', fontSize:'0.875rem', fontWeight:'600', cursor:'pointer', whiteSpace:'nowrap' }}>
+                  {loading ? 'Creating...' : '+ Create Course'}
+                </button>
+              </form>
+            </div>
 
-        {/* OVERVIEW TAB */}
-        {activeTab === 'overview' && stats && (
-          <div className="admin-tab-content">
-            <h2>Dashboard Overview</h2>
-            <div className="admin-stats-grid">
-              {[
-                { label: 'Total Users', value: stats.users || users.length, icon: '👥' },
-                { label: 'Courses', value: stats.courses || courses.length, icon: '📚' },
-                { label: 'Enrollments', value: stats.enrollments || enrollments.length, icon: '📝' },
-                { label: 'Materials', value: stats.materials || materials.length, icon: '📄' },
-                { label: 'Document Chunks', value: stats.chunks || 0, icon: '🔍' },
-                { label: 'Chat Sessions', value: stats.chatSessions || 0, icon: '💬' },
-                { label: 'Messages', value: stats.messages || 0, icon: '💭' },
-                { label: 'Bookmarks', value: stats.bookmarks || 0, icon: '🔖' },
-              ].map((stat, i) => (
-                <div key={i} className="admin-stat-card">
-                  <div className="admin-stat-icon">{stat.icon}</div>
-                  <div className="admin-stat-number">{stat.value}</div>
-                  <div className="admin-stat-label">{stat.label}</div>
+            <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', overflow:'hidden' }}>
+              <div style={{ padding:'1rem 1.5rem', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                <h3 style={{ fontWeight:'600', color:'#0f172a', margin:0, fontSize:'0.95rem' }}>All Courses</h3>
+                <span style={{ fontSize:'0.8rem', color:'#64748b' }}>{courses.length} total</span>
+              </div>
+              {courses.length === 0 ? (
+                <p style={{ textAlign:'center', color:'#9ca3af', padding:'2rem', margin:0 }}>No courses yet. Create one above.</p>
+              ) : courses.map((course,i) => (
+                <div key={course.id} style={{ padding:'1rem 1.5rem', borderBottom: i < courses.length-1 ? '1px solid #f8fafc' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <div>
+                    <p style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 0.2rem', fontSize:'0.9rem' }}>{course.name}</p>
+                    <p style={{ color:'#9ca3af', margin:0, fontSize:'0.75rem', fontFamily:'monospace' }}>{course.id}</p>
+                  </div>
+                  <div style={{ display:'flex', gap:'0.5rem' }}>
+                    <span style={{ background:'#eff6ff', color:'#6366f1', fontSize:'0.75rem', fontWeight:'600', padding:'0.25rem 0.75rem', borderRadius:'20px' }}>{course._count?.enrollments||0} students</span>
+                    <span style={{ background:'#f1f5f9', color:'#64748b', fontSize:'0.75rem', fontWeight:'600', padding:'0.25rem 0.75rem', borderRadius:'20px' }}>{course._count?.materials||0} materials</span>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* COURSES TAB */}
-        {activeTab === 'courses' && (
-          <div className="admin-tab-content">
-            <h2>Manage Courses</h2>
-
-            {/* Create Course Form */}
-            <div className="admin-form-section">
-              <h3>Create New Course</h3>
-              <form onSubmit={createCourse} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <input
-                  value={newCourse.name}
-                  onChange={(e) => setNewCourse({ ...newCourse, name: e.target.value })}
-                  placeholder="Course name"
-                  className="admin-form-input"
-                  required
-                  style={{ flex: 1, minWidth: '200px' }}
-                />
-                <input
-                  value={newCourse.subject}
-                  onChange={(e) => setNewCourse({ ...newCourse, subject: e.target.value })}
-                  placeholder="Subject"
-                  className="admin-form-input"
-                  style={{ flex: 1, minWidth: '150px' }}
-                />
-                <button type="submit" disabled={loading} className="admin-btn admin-btn-primary">
-                  {loading ? 'Creating...' : '+ Create'}
-                </button>
-              </form>
+        {/* Students Tab */}
+        {activeTab==='students' && (
+          <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', overflow:'hidden' }}>
+            <div style={{ padding:'1rem 1.5rem', borderBottom:'1px solid #f1f5f9' }}>
+              <h3 style={{ fontWeight:'600', color:'#0f172a', margin:0, fontSize:'0.95rem' }}>All Students</h3>
             </div>
-
-            {/* Courses List */}
-            {courses.length === 0 ? (
-              <p>No courses found</p>
-            ) : (
-              <div className="admin-courses-list">
-                {courses.map((course) => (
-                  <div key={course.id} className="admin-course-card">
-                    <div className="admin-course-info">
-                      <h3>{course.name}</h3>
-                      <p className="admin-subject">{course.subject}</p>
-                      <div className="admin-course-stats">
-                        <span>👥 {course._count?.enrollments || 0} students</span>
-                        <span>📄 {course._count?.materials || 0} materials</span>
-                      </div>
-                    </div>
-                    <div className="admin-course-actions">
-                      <button
-                        className="admin-btn admin-btn-secondary"
-                        onClick={() => setEditingCourse(course)}
-                      >
-                        ✏️ Edit
-                      </button>
-                      <button
-                        className="admin-btn admin-btn-danger"
-                        onClick={() => deleteCourse(course.id)}
-                      >
-                        🗑️ Delete
-                      </button>
-                    </div>
+            {users.map((u,i) => (
+              <div key={u.id} style={{ padding:'1rem 1.5rem', borderBottom: i < users.length-1 ? '1px solid #f8fafc' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
+                  <div style={{ width:'36px', height:'36px', background:'#eff6ff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', fontSize:'13px', color:'#6366f1' }}>
+                    {u.name?.charAt(0).toUpperCase()}
                   </div>
-                ))}
+                  <div>
+                    <p style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 0.1rem', fontSize:'0.875rem' }}>{u.name}</p>
+                    <p style={{ color:'#9ca3af', margin:0, fontSize:'0.75rem' }}>{u.email}</p>
+                  </div>
+                </div>
+                <span style={{ background: u.role==='ADMIN' ? '#f5f3ff' : '#f1f5f9', color: u.role==='ADMIN' ? '#7c3aed' : '#64748b', fontSize:'0.75rem', fontWeight:'600', padding:'0.25rem 0.75rem', borderRadius:'20px' }}>
+                  {u.role==='ADMIN' ? 'Admin' : 'Student'}
+                </span>
               </div>
-            )}
+            ))}
           </div>
         )}
 
-        {/* MATERIALS TAB */}
-        {activeTab === 'materials' && (
-          <div className="admin-tab-content">
-            <div className="admin-materials-header">
-              <h2>All Course Materials</h2>
-              <button
-                className="admin-btn admin-btn-primary"
-                onClick={() => navigate('/admin/upload')}
-              >
-                📤 Upload New Material
-              </button>
-            </div>
-
-            {materials.length === 0 ? (
-              <p>No materials found</p>
-            ) : (
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>Course</th>
-                    <th>Type</th>
-                    <th>Uploaded Date</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {materials.map((m) => (
-                    <tr key={m.id}>
-                      <td>{m.title}</td>
-                      <td>{m.course?.name || 'Unknown'}</td>
-                      <td><span className="admin-type-badge">{m.type || 'PDF'}</span></td>
-                      <td>{m.createdAt ? new Date(m.createdAt).toLocaleDateString() : 'N/A'}</td>
-                      <td>
-                        <button
-                          className="admin-btn admin-btn-small admin-btn-danger"
-                          onClick={() => deleteMaterial(m.id)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-
-        {/* ENROLLMENTS TAB */}
-        {activeTab === 'enrollments' && (
-          <div className="admin-tab-content">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-              {/* Enroll Form */}
-              <div className="admin-form-section">
-                <h3>Enroll Student</h3>
-                <form onSubmit={enrollStudent} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div>
-                    <label>Student</label>
-                    <select
-                      value={enrollForm.userId}
-                      onChange={(e) => setEnrollForm({ ...enrollForm, userId: e.target.value })}
-                      className="admin-form-input"
-                      required
-                    >
-                      <option value="">Select student...</option>
-                      {users.filter(u => u.role !== 'ADMIN').map(u => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label>Course</label>
-                    <select
-                      value={enrollForm.courseId}
-                      onChange={(e) => setEnrollForm({ ...enrollForm, courseId: e.target.value })}
-                      className="admin-form-input"
-                      required
-                    >
-                      <option value="">Select course...</option>
-                      {courses.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <button type="submit" disabled={loading} className="admin-btn admin-btn-primary">
-                    {loading ? 'Enrolling...' : 'Enroll Student'}
-                  </button>
-                </form>
-              </div>
-
-              {/* Enrollments List */}
+        {/* Enroll Tab */}
+        {activeTab==='enroll' && (
+          <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.5rem', maxWidth:'480px' }}>
+            <h3 style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 0.35rem', fontSize:'0.95rem' }}>Enroll a student</h3>
+            <p style={{ color:'#64748b', margin:'0 0 1.25rem', fontSize:'0.85rem' }}>Assign a student to a course so they can access the AI tutor.</p>
+            <form onSubmit={enrollStudent} style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
               <div>
-                <h3>All Enrollments ({enrollments.length})</h3>
-                {enrollments.length === 0 ? (
-                  <p>No enrollments found</p>
-                ) : (
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>Student</th>
-                        <th>Course</th>
-                        <th>Date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {enrollments.map((e) => (
-                        <tr key={e.id}>
-                          <td>{e.user?.name || 'Unknown'}</td>
-                          <td>{e.course?.name || 'Unknown'}</td>
-                          <td>{e.createdAt ? new Date(e.createdAt).toLocaleDateString() : 'N/A'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                <label style={{ display:'block', fontSize:'0.8rem', fontWeight:'500', color:'#374151', marginBottom:'0.4rem' }}>Student</label>
+                <select value={enrollForm.userId} onChange={e => setEnrollForm({...enrollForm,userId:e.target.value})} required style={selectStyle}>
+                  <option value="">Select student...</option>
+                  {users.filter(u => u.role!=='ADMIN').map(u => (
+                    <option key={u.id} value={u.id}>{u.name} — {u.email}</option>
+                  ))}
+                </select>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* EDIT COURSE MODAL */}
-        {editingCourse && (
-          <div className="admin-modal-overlay">
-            <div className="admin-modal">
-              <h3>Edit Course</h3>
-              <input
-                type="text"
-                placeholder="Course Name"
-                defaultValue={editingCourse.name}
-                id="editName"
-                className="admin-form-input"
-              />
-              <input
-                type="text"
-                placeholder="Subject"
-                defaultValue={editingCourse.subject}
-                id="editSubject"
-                className="admin-form-input"
-              />
-              <div className="admin-modal-actions">
-                <button
-                  onClick={() => {
-                    updateCourse(editingCourse.id, {
-                      name: document.getElementById('editName').value,
-                      subject: document.getElementById('editSubject').value,
-                    });
-                  }}
-                  className="admin-btn admin-btn-primary"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={() => setEditingCourse(null)}
-                  className="admin-btn admin-btn-secondary"
-                >
-                  Cancel
-                </button>
+              <div>
+                <label style={{ display:'block', fontSize:'0.8rem', fontWeight:'500', color:'#374151', marginBottom:'0.4rem' }}>Course</label>
+                <select value={enrollForm.courseId} onChange={e => setEnrollForm({...enrollForm,courseId:e.target.value})} required style={selectStyle}>
+                  <option value="">Select course...</option>
+                  {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
-            </div>
+              <button type="submit" disabled={loading} style={{ padding:'0.75rem', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff', border:'none', borderRadius:'10px', fontSize:'0.9rem', fontWeight:'600', cursor:'pointer' }}>
+                {loading ? 'Enrolling...' : 'Enroll Student →'}
+              </button>
+            </form>
           </div>
         )}
       </main>
