@@ -1,52 +1,94 @@
-require('dotenv').config();
-require('express-async-errors');
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Dashboard from './pages/Dashboard';
+import Chat from './pages/Chat';
+import Bookmarks from './pages/Bookmarks';
+import Quiz from './pages/Quiz';
+import Flashcards from './pages/Flashcards';
+import AdminDashboard from './pages/AdminDashboard';
+import UploadMaterial from './pages/UploadMaterial';
+import Analytics from './pages/Analytics';
+import ResetPassword from './pages/ResetPassword';
+import Profile from './pages/Profile';
+import SearchChats from './pages/SearchChats';
+import Summariser from './pages/Summariser';
+import './App.css';
 
-const app = express();
+// Redirect based on user role
+function HomeRedirect() {
+  const { user, token } = useAuth();
 
-// ── CORS ─────────────────────────────────────────────
-// Allow all origins to fix Vercel → Render CORS issue
-app.use(cors({
-  origin: true,
-  credentials: true,
-}));
+  if (!token) {
+    return <Login />;
+  }
 
-app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+  if (user?.role === 'ADMIN') {
+    window.location.href = '/admin';
+    return null;
+  }
 
-// ── Routes ───────────────────────────────────────────
-app.use('/api/auth',          require('./routes/auth'));
-app.use('/api/courses',       require('./routes/courses'));
-app.use('/api/chat',          require('./routes/chat'));
-app.use('/api/materials',     require('./routes/materials'));
-app.use('/api/admin',         require('./routes/admin'));
-app.use('/api/feedback',      require('./routes/feedback'));
-app.use('/api/bookmarks',     require('./routes/bookmarks'));
-app.use('/api/quiz',          require('./routes/quiz'));
-app.use('/api/flashcards',    require('./routes/flashcards'));
-app.use('/api/analytics',     require('./routes/analytics'));
-app.use('/api/profile',       require('./routes/profile'));
-app.use('/api/notifications', require('./routes/notifications'));
+  window.location.href = '/dashboard';
+  return null;
+}
 
-// ── Health Check ─────────────────────────────────────
-app.get('/', (req, res) => {
-  res.json({ status: 'OK', message: 'AI Study Assistant API Running' });
-});
+// Protected Route Component
+function ProtectedRoute({ children, adminOnly = false }) {
+  const { user, token } = useAuth();
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'AI Study Assistant Backend Running' });
-});
+  if (!token) {
+    window.location.href = '/login';
+    return null;
+  }
 
-// ── Global Error Handler ──────────────────────────────
-app.use((err, req, res, next) => {
-  console.error(err.message);
-  res.status(500).json({ error: err.message || 'Server error' });
-});
+  if (adminOnly && user?.role !== 'ADMIN') {
+    window.location.href = '/dashboard';
+    return null;
+  }
 
-// ── Start Server ──────────────────────────────────────
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+  return children;
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      {/* Public Routes */}
+      <Route path="/" element={<HomeRedirect />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+
+      {/* Student Routes */}
+      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/chat/:courseId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+      <Route path="/bookmarks" element={<ProtectedRoute><Bookmarks /></ProtectedRoute>} />
+      <Route path="/quiz/:courseId" element={<ProtectedRoute><Quiz /></ProtectedRoute>} />
+      <Route path="/flashcards/:courseId" element={<ProtectedRoute><Flashcards /></ProtectedRoute>} />
+      <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+      <Route path="/search" element={<ProtectedRoute><SearchChats /></ProtectedRoute>} />
+      <Route path="/summarise" element={<ProtectedRoute><Summariser /></ProtectedRoute>} />
+
+      {/* Admin Routes */}
+      <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/admin/upload" element={<ProtectedRoute adminOnly><UploadMaterial /></ProtectedRoute>} />
+      <Route path="/admin/analytics" element={<ProtectedRoute adminOnly><Analytics /></ProtectedRoute>} />
+      <Route path="/upload" element={<ProtectedRoute adminOnly><UploadMaterial /></ProtectedRoute>} />
+      <Route path="/upload-materials" element={<ProtectedRoute adminOnly><UploadMaterial /></ProtectedRoute>} />
+      <Route path="/analytics" element={<ProtectedRoute adminOnly><Analytics /></ProtectedRoute>} />
+
+      {/* Catch all */}
+      <Route path="*" element={<HomeRedirect />} />
+    </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
