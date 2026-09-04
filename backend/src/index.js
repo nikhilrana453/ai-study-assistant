@@ -28,7 +28,8 @@ app.use('/api/quiz',          require('./routes/quiz'));
 app.use('/api/flashcards',    require('./routes/flashcards'));
 app.use('/api/analytics',     require('./routes/analytics'));
 app.use('/api/profile',       require('./routes/profile'));
-app.use('/api/notifications', require('./routes/notifications'));
+// Commented out: notifications route (not in Prisma schema)
+// app.use('/api/notifications', require('./routes/notifications'));
 
 // ── Health Check ─────────────────────────────────────
 app.get('/', (req, res) => {
