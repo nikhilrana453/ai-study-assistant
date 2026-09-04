@@ -411,4 +411,106 @@ router.get('/stats', authenticateToken, checkAdmin, async (req, res) => {
   }
 });
 
+// ============================================================
+// ANALYTICS DATA (for analytics dashboard)
+// ============================================================
+router.get('/analytics', authenticateToken, checkAdmin, async (req, res) => {
+  try {
+    // Get materials per course
+    const coursesWithMaterials = await prisma.course.findMany({
+      include: {
+        _count: {
+          select: { materials: true }
+        }
+      }
+    });
+
+    const materialsPerCourse = coursesWithMaterials.map(course => ({
+      name: course.name,
+      materials: course._count.materials
+    }));
+
+    // Get daily activity (last 7 days) - questions vs answers
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const dailyMessages = await prisma.message.findMany({
+      where: {
+        createdAt: { gte: sevenDaysAgo }
+      },
+      select: {
+        createdAt: true,
+        role: true
+      }
+    });
+
+    // Process daily activity
+    const dailyActivityMap = {};
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const dayString = date.toLocaleDateString('en-US', { weekday: 'short' });
+      dailyActivityMap[dayString] = { questions: 0, answers: 0 };
+    }
+
+    dailyMessages.forEach(msg => {
+      const dayString = new Date(msg.createdAt).toLocaleDateString('en-US', { weekday: 'short' });
+      if (msg.role === 'user') {
+        dailyActivityMap[dayString].questions += 1;
+      } else {
+        dailyActivityMap[dayString].answers += 1;
+      }
+    });
+
+    const dailyActivity = Object.keys(dailyActivityMap).map(day => ({
+      day,
+      questions: dailyActivityMap[day].questions,
+      answers: dailyActivityMap[day].answers
+    })).reverse();
+
+    // Get course stats (enrollment by course)
+    const courseStats = await prisma.course.findMany({
+      include: {
+        _count: {
+          select: { enrollments: true }
+        }
+      }
+    });
+
+    const courseStatsData = courseStats.map(course => ({
+      name: course.name,
+      enrollment: course._count.enrollments
+    }));
+
+    // Get recent questions (from chat messages)
+    const recentMessages = await prisma.message.findMany({
+      where: { role: 'user' },
+      include: {
+        session: {
+          include: {
+            user: { select: { name: true } }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10
+    });
+
+    const recentQuestions = recentMessages.map(msg => ({
+      id: msg.id,
+      studentName: msg.session?.user?.name || 'Unknown',
+      question: msg.content || '',
+      timestamp: new Date(msg.createdAt).toLocaleDateString()
+    }));
+
+    res.json({
+      materialsPerCourse,
+      dailyActivity,
+      courseStats: courseStatsData,
+      recentQuestions
+    });
+  } catch (err) {
+    console.error('❌ Error fetching analytics:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
