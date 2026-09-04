@@ -1,66 +1,52 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { ThemeProvider } from './context/ThemeContext';
-import ProtectedRoute from './components/ProtectedRoute';
-import Login          from './pages/Login';
-import Register       from './pages/Register';
-import Dashboard      from './pages/Dashboard';
-import Chat           from './pages/Chat';
-import AdminDashboard from './pages/AdminDashboard';
-import UploadMaterial from './pages/UploadMaterial';
-import Analytics      from './pages/Analytics';
-import Bookmarks      from './pages/Bookmarks';
+require('dotenv').config();
+require('express-async-errors');
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
 
-function HomeRedirect() {
-  const { token, user } = useAuth();
-  if (!token) return <Navigate to="/login" replace />;
-  if (user?.role === 'ADMIN') return <Navigate to="/admin" replace />;
-  return <Navigate to="/dashboard" replace />;
-}
+const app = express();
 
-export default function App() {
-  return (
-    <AuthProvider>
-      <ThemeProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/"        element={<HomeRedirect />} />
-            <Route path="/login"   element={<Login />} />
-            <Route path="/register" element={<Register />} />
+// ── CORS ─────────────────────────────────────────────
+// Allow all origins to fix Vercel → Render CORS issue
+app.use(cors({
+  origin: true,
+  credentials: true,
+}));
 
-            {/* Student Routes */}
-            <Route path="/dashboard" element={
-              <ProtectedRoute><Dashboard /></ProtectedRoute>
-            } />
-            <Route path="/chat/:courseId" element={
-              <ProtectedRoute><Chat /></ProtectedRoute>
-            } />
-            <Route path="/bookmarks" element={
-              <ProtectedRoute><Bookmarks /></ProtectedRoute>
-            } />
+app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-            {/* Admin Routes */}
-            <Route path="/admin" element={
-              <ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>
-            } />
-            <Route path="/upload-materials" element={
-              <ProtectedRoute adminOnly><UploadMaterial /></ProtectedRoute>
-            } />
-            <Route path="/upload" element={
-              <ProtectedRoute adminOnly><UploadMaterial /></ProtectedRoute>
-            } />
-            <Route path="/admin/upload" element={
-              <ProtectedRoute adminOnly><UploadMaterial /></ProtectedRoute>
-            } />
-            <Route path="/analytics" element={
-              <ProtectedRoute adminOnly><Analytics /></ProtectedRoute>
-            } />
+// ── Routes ───────────────────────────────────────────
+app.use('/api/auth',          require('./routes/auth'));
+app.use('/api/courses',       require('./routes/courses'));
+app.use('/api/chat',          require('./routes/chat'));
+app.use('/api/materials',     require('./routes/materials'));
+app.use('/api/admin',         require('./routes/admin'));
+app.use('/api/feedback',      require('./routes/feedback'));
+app.use('/api/bookmarks',     require('./routes/bookmarks'));
+app.use('/api/quiz',          require('./routes/quiz'));
+app.use('/api/flashcards',    require('./routes/flashcards'));
+app.use('/api/analytics',     require('./routes/analytics'));
+app.use('/api/profile',       require('./routes/profile'));
+app.use('/api/notifications', require('./routes/notifications'));
 
-            {/* Catch-all */}
-            <Route path="*" element={<HomeRedirect />} />
-          </Routes>
-        </BrowserRouter>
-      </ThemeProvider>
-    </AuthProvider>
-  );
-}
+// ── Health Check ─────────────────────────────────────
+app.get('/', (req, res) => {
+  res.json({ status: 'OK', message: 'AI Study Assistant API Running' });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'AI Study Assistant Backend Running' });
+});
+
+// ── Global Error Handler ──────────────────────────────
+app.use((err, req, res, next) => {
+  console.error(err.message);
+  res.status(500).json({ error: err.message || 'Server error' });
+});
+
+// ── Start Server ──────────────────────────────────────
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
