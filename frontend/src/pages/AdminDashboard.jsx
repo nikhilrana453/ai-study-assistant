@@ -4,219 +4,812 @@ import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 
 export default function AdminDashboard() {
-  const [courses, setCourses]       = useState([]);
-  const [users, setUsers]           = useState([]);
-  const [newCourse, setNewCourse]   = useState({ name:'', subject:'' });
-  const [enrollForm, setEnrollForm] = useState({ userId:'', courseId:'' });
-  const [activeTab, setActiveTab]   = useState('courses');
-  const [loading, setLoading]       = useState(false);
-  const [toast, setToast]           = useState(null);
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  // ─────── STATE ───────────
+  const [activeTab, setActiveTab] = useState('courses');
+  const [courses, setCourses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [enrollments, setEnrollments] = useState([]);
+  const [stats, setStats] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState('');
+
+  // COURSES form state
+  const [courseForm, setCourseForm] = useState({ name: '', subject: '', description: '' });
+  const [editingCourseId, setEditingCourseId] = useState(null);
+  const [showCourseForm, setShowCourseForm] = useState(false);
+  const [expandedCourseId, setExpandedCourseId] = useState(null);
+  const [courseMaterials, setCourseMaterials] = useState({});
+
+  // MATERIALS form state
+  const [materialForm, setMaterialForm] = useState({ title: '', type: 'pdf', topic: '', week: '' });
+  const [editingMaterialId, setEditingMaterialId] = useState(null);
+  const [showMaterialForm, setShowMaterialForm] = useState(false);
+  const [materialCourseId, setMaterialCourseId] = useState(null);
+
+  // STUDENTS form state
+  const [studentForm, setStudentForm] = useState({ name: '', email: '', password: '', role: 'STUDENT' });
+  const [showStudentForm, setShowStudentForm] = useState(false);
+  const [editingStudentId, setEditingStudentId] = useState(null);
+
+  // ENROLL form state
+  const [enrollForm, setEnrollForm] = useState({ userId: '', courseId: '' });
+  const [showEnrollForm, setShowEnrollForm] = useState(false);
+
+  // ─────── LOAD DATA ───────────
   useEffect(() => {
-    api.get('/admin/courses').then(r => setCourses(r.data)).catch(console.error);
-    api.get('/admin/users').then(r => setUsers(r.data)).catch(console.error);
+    loadAllData();
   }, []);
 
-  const showToast = (msg, type='success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  const createCourse = async (e) => {
-    e.preventDefault();
+  const loadAllData = async () => {
     setLoading(true);
     try {
-      const res = await api.post('/admin/courses', newCourse);
-      setCourses(prev => [...prev, res.data]);
-      setNewCourse({ name:'', subject:'' });
-      showToast('Course created successfully');
-    } catch { showToast('Failed to create course', 'error'); }
-    finally { setLoading(false); }
+      const [coursesRes, studentsRes, enrollRes, statsRes] = await Promise.all([
+        api.get('/admin/courses'),
+        api.get('/admin/users'),
+        api.get('/admin/enrollments'),
+        api.get('/admin/stats')
+      ]);
+
+      setCourses(coursesRes.data || []);
+      setStudents(studentsRes.data || []);
+      setEnrollments(enrollRes.data.enrollments || []);
+      setStats(statsRes.data.stats || {});
+    } catch (err) {
+      showToast('Error loading data: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const enrollStudent = async (e) => {
-    e.preventDefault();
+  // ─────── TOAST ───────────
+  const showToast = (msg, type = 'success') => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 3000);
+  };
+
+  // ═════════════════════════════════════════════════════════
+  // COURSES CRUD
+  // ═════════════════════════════════════════════════════════
+
+  const handleSaveCourse = async () => {
+    if (!courseForm.name.trim()) {
+      showToast('Course name is required', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
-      await api.post('/admin/enroll', enrollForm);
-      setEnrollForm({ userId:'', courseId:'' });
+      if (editingCourseId) {
+        await api.put(`/admin/courses/${editingCourseId}`, courseForm);
+        showToast('Course updated successfully');
+      } else {
+        await api.post('/admin/courses', courseForm);
+        showToast('Course created successfully');
+      }
+      setCourseForm({ name: '', subject: '', description: '' });
+      setEditingCourseId(null);
+      setShowCourseForm(false);
+      loadAllData();
+    } catch (err) {
+      showToast('Error saving course: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditCourse = (course) => {
+    setCourseForm({ name: course.name, subject: course.subject, description: course.description });
+    setEditingCourseId(course.id);
+    setShowCourseForm(true);
+  };
+
+  const handleDeleteCourse = async (courseId) => {
+    if (!confirm('Are you sure you want to delete this course? This will delete all materials and enrollments.')) return;
+    setLoading(true);
+    try {
+      await api.delete(`/admin/courses/${courseId}`);
+      showToast('Course deleted successfully');
+      loadAllData();
+    } catch (err) {
+      showToast('Error deleting course: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCourseMaterials = async (courseId) => {
+    try {
+      const res = await api.get(`/admin/courses/${courseId}/materials`);
+      setCourseMaterials(prev => ({ ...prev, [courseId]: res.data.materials }));
+    } catch (err) {
+      showToast('Error loading materials: ' + err.message, 'error');
+    }
+  };
+
+  // ═════════════════════════════════════════════════════════
+  // MATERIALS CRUD
+  // ═════════════════════════════════════════════════════════
+
+  const handleSaveMaterial = async () => {
+    if (!materialForm.title.trim() || !materialCourseId) {
+      showToast('Material title and course are required', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Note: Full material upload would require file upload
+      // This is a placeholder for basic metadata
+      if (editingMaterialId) {
+        // Update would go here
+        showToast('Material update not yet implemented - requires file upload');
+      } else {
+        showToast('Material creation not yet implemented - requires file upload and backend processing');
+      }
+      setMaterialForm({ title: '', type: 'pdf', topic: '', week: '' });
+      setEditingMaterialId(null);
+      setShowMaterialForm(false);
+      setMaterialCourseId(null);
+    } catch (err) {
+      showToast('Error saving material: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteMaterial = async (materialId, courseId) => {
+    if (!confirm('Delete this material?')) return;
+    setLoading(true);
+    try {
+      await api.delete(`/admin/materials/${materialId}`);
+      showToast('Material deleted successfully');
+      loadCourseMaterials(courseId);
+    } catch (err) {
+      showToast('Error deleting material: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ═════════════════════════════════════════════════════════
+  // STUDENTS CRUD
+  // ═════════════════════════════════════════════════════════
+
+  const handleSaveStudent = async () => {
+    if (!studentForm.name.trim() || !studentForm.email.trim()) {
+      showToast('Name and email are required', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (editingStudentId) {
+        // Update student (backend needs to support this)
+        showToast('Student update not yet implemented in backend');
+      } else {
+        // Create student via registration endpoint or direct API
+        await api.post('/auth/register', {
+          name: studentForm.name,
+          email: studentForm.email,
+          password: studentForm.password || 'TempPassword123!',
+          role: studentForm.role
+        });
+        showToast('Student created successfully');
+      }
+      setStudentForm({ name: '', email: '', password: '', role: 'STUDENT' });
+      setEditingStudentId(null);
+      setShowStudentForm(false);
+      loadAllData();
+    } catch (err) {
+      showToast('Error saving student: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteStudent = async (studentId, studentEmail) => {
+    if (!confirm(`Delete student ${studentEmail}? This cannot be undone.`)) return;
+    setLoading(true);
+    try {
+      await api.delete(`/admin/users/${studentId}`);
+      showToast('Student deleted successfully');
+      loadAllData();
+    } catch (err) {
+      showToast('Error deleting student: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ═════════════════════════════════════════════════════════
+  // ENROLLMENTS CRUD
+  // ═════════════════════════════════════════════════════════
+
+  const handleEnrollStudent = async () => {
+    if (!enrollForm.userId || !enrollForm.courseId) {
+      showToast('Please select both student and course', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await api.post('/admin/enroll', {
+        userId: enrollForm.userId,
+        courseId: enrollForm.courseId
+      });
       showToast('Student enrolled successfully');
-      api.get('/admin/courses').then(r => setCourses(r.data));
-    } catch { showToast('Failed to enroll student', 'error'); }
-    finally { setLoading(false); }
+      setEnrollForm({ userId: '', courseId: '' });
+      setShowEnrollForm(false);
+      loadAllData();
+    } catch (err) {
+      showToast('Error enrolling student: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const tabs = [
-    { id:'courses',  label:'Courses',  count: courses.length },
-    { id:'students', label:'Students', count: users.length },
-    { id:'enroll',   label:'Enroll',   count: null },
-  ];
+  const handleRemoveEnrollment = async (enrollmentId) => {
+    if (!confirm('Remove this enrollment?')) return;
+    setLoading(true);
+    try {
+      await api.delete(`/admin/enrollments/${enrollmentId}`);
+      showToast('Enrollment removed successfully');
+      loadAllData();
+    } catch (err) {
+      showToast('Error removing enrollment: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const inputStyle = { width:'100%', padding:'0.65rem 0.9rem', border:'1px solid #d1d5db', borderRadius:'10px', fontSize:'0.875rem', outline:'none', boxSizing:'border-box', color:'#0f172a', background:'#fff' };
-  const selectStyle = { ...inputStyle, background:'#fff' };
+  // ─────── STYLES ───────────
+  const styles = {
+    container: {
+      padding: '1.5rem',
+      background: '#f8fafc',
+      minHeight: '100vh',
+      fontFamily: 'system-ui, sans-serif',
+    },
+    navbar: {
+      background: '#fff',
+      padding: '1rem 1.5rem',
+      borderBottom: '1px solid #e2e8f0',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '1.5rem',
+      borderRadius: '12px',
+    },
+    statsGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+      gap: '1rem',
+      marginBottom: '2rem',
+    },
+    statCard: {
+      background: '#fff',
+      padding: '1.25rem',
+      borderRadius: '12px',
+      border: '1px solid #e2e8f0',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+    },
+    statValue: {
+      fontSize: '1.875rem',
+      fontWeight: '700',
+      color: '#6366f1',
+      margin: '0.5rem 0 0',
+    },
+    statLabel: {
+      fontSize: '0.875rem',
+      color: '#64748b',
+      fontWeight: '500',
+    },
+    tabs: {
+      display: 'flex',
+      gap: '0.5rem',
+      marginBottom: '1.5rem',
+      borderBottom: '2px solid #e2e8f0',
+    },
+    tab: (active) => ({
+      padding: '0.75rem 1.5rem',
+      background: active ? '#6366f1' : 'transparent',
+      color: active ? '#fff' : '#64748b',
+      border: 'none',
+      cursor: 'pointer',
+      fontSize: '0.95rem',
+      fontWeight: '600',
+      borderRadius: '8px 8px 0 0',
+      transition: 'all 0.2s',
+    }),
+    card: {
+      background: '#fff',
+      padding: '1.5rem',
+      borderRadius: '12px',
+      border: '1px solid #e2e8f0',
+      marginBottom: '1rem',
+    },
+    button: (variant = 'primary') => ({
+      padding: '0.6rem 1.2rem',
+      background: variant === 'primary' ? '#6366f1' : variant === 'danger' ? '#ef4444' : '#f1f5f9',
+      color: variant === 'primary' ? '#fff' : variant === 'danger' ? '#fff' : '#0f172a',
+      border: 'none',
+      borderRadius: '8px',
+      cursor: 'pointer',
+      fontSize: '0.875rem',
+      fontWeight: '600',
+      transition: 'all 0.2s',
+    }),
+    input: {
+      width: '100%',
+      padding: '0.75rem',
+      border: '1px solid #e2e8f0',
+      borderRadius: '8px',
+      fontSize: '0.9rem',
+      marginBottom: '0.75rem',
+      fontFamily: 'system-ui, sans-serif',
+    },
+    formGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+      gap: '1rem',
+      marginBottom: '1rem',
+    },
+    table: {
+      width: '100%',
+      borderCollapse: 'collapse',
+    },
+    toast: (type) => ({
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      padding: '1rem 1.5rem',
+      background: type === 'error' ? '#ef4444' : '#10b981',
+      color: '#fff',
+      borderRadius: '8px',
+      zIndex: 1000,
+      boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+    }),
+  };
 
   return (
-    <div style={{ minHeight:'100vh', background:'#f8fafc', fontFamily:'system-ui,sans-serif' }}>
-
-      {/* Toast */}
-      {toast && (
-        <div style={{ position:'fixed', top:'1rem', right:'1rem', zIndex:999, background: toast.type==='error' ? '#fef2f2' : '#f0fdf4', border:`1px solid ${toast.type==='error' ? '#fecaca' : '#bbf7d0'}`, color: toast.type==='error' ? '#dc2626' : '#16a34a', padding:'0.75rem 1.25rem', borderRadius:'12px', fontSize:'0.875rem', fontWeight:'500', boxShadow:'0 4px 12px rgba(0,0,0,0.1)' }}>
-          {toast.type==='error' ? '⚠️' : '✅'} {toast.msg}
+    <div style={styles.container}>
+      {/* NAVBAR */}
+      <nav style={styles.navbar}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#0f172a' }}>Admin Dashboard</h1>
         </div>
-      )}
-
-      {/* Navbar */}
-      <nav style={{ background:'#fff', borderBottom:'1px solid #e2e8f0', padding:'0 1.5rem', position:'sticky', top:0, zIndex:100 }}>
-        <div style={{ maxWidth:'1100px', margin:'0 auto', height:'60px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.625rem' }}>
-            <div style={{ width:'32px', height:'32px', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', borderRadius:'10px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px' }}>📚</div>
-            <span style={{ fontWeight:'700', fontSize:'1rem', color:'#0f172a' }}>Admin Panel</span>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
-            <button onClick={() => navigate('/admin/upload')} style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)', border:'none', color:'#fff', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'600' }}>
-              ↑ Upload Materials
-            </button>
-            <button onClick={() => navigate('/admin/analytics')} style={{ background:'linear-gradient(135deg,#10b981,#059669)', border:'none', color:'#fff', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'600' }}>
-              📊 Analytics
-            </button>
-            <button onClick={() => navigate('/dashboard')} style={{ background:'none', border:'1px solid #e2e8f0', color:'#64748b', padding:'0.45rem 1rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer' }}>
-              Dashboard
-            </button>
-            <button onClick={logout} style={{ background:'#fef2f2', border:'1px solid #fecaca', color:'#dc2626', padding:'0.45rem 0.9rem', borderRadius:'8px', fontSize:'0.8rem', cursor:'pointer', fontWeight:'500' }}>
-              Sign out
-            </button>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <button
+            onClick={() => navigate('/admin/upload')}
+            style={styles.button('primary')}
+          >
+            📤 Upload Materials
+          </button>
+          <button
+            onClick={() => navigate('/admin/analytics')}
+            style={styles.button('primary')}
+          >
+            📊 Analytics
+          </button>
+          <span style={{ color: '#64748b', fontSize: '0.9rem' }}>
+            {user?.name}
+          </span>
+          <button
+            onClick={logout}
+            style={styles.button()}
+          >
+            Sign Out
+          </button>
         </div>
       </nav>
 
-      <main style={{ maxWidth:'1100px', margin:'0 auto', padding:'2rem 1.5rem' }}>
+      {/* STATS */}
+      <div style={styles.statsGrid}>
+        <div style={styles.statCard}>
+          <div style={styles.statLabel}>Total Courses</div>
+          <div style={styles.statValue}>{stats.courses || 0}</div>
+        </div>
+        <div style={styles.statCard}>
+          <div style={styles.statLabel}>Total Students</div>
+          <div style={styles.statValue}>{stats.users || 0}</div>
+        </div>
+        <div style={styles.statCard}>
+          <div style={styles.statLabel}>Total Enrollments</div>
+          <div style={styles.statValue}>{stats.enrollments || 0}</div>
+        </div>
+        <div style={styles.statCard}>
+          <div style={styles.statLabel}>Total Materials</div>
+          <div style={styles.statValue}>{stats.materials || 0}</div>
+        </div>
+      </div>
 
-        {/* Stats */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'1rem', marginBottom:'2rem' }}>
-          {[
-            { label:'Total Courses',     value: courses.length, icon:'📚', color:'#eff6ff' },
-            { label:'Total Students',    value: users.length,   icon:'👥', color:'#f5f3ff' },
-            { label:'Total Enrollments', value: courses.reduce((a,c) => a+(c._count?.enrollments||0), 0), icon:'✅', color:'#ecfdf5' },
-          ].map(s => (
-            <div key={s.label} style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.25rem 1.5rem' }}>
-              <p style={{ color:'#64748b', fontSize:'0.8rem', margin:'0 0 0.5rem' }}>{s.label}</p>
-              <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
-                <span style={{ fontSize:'1.75rem' }}>{s.icon}</span>
-                <span style={{ fontSize:'1.75rem', fontWeight:'700', color:'#0f172a' }}>{s.value}</span>
+      {/* TOAST */}
+      {toast && (
+        <div style={styles.toast(toast.includes('Error') ? 'error' : 'success')}>
+          {toast}
+        </div>
+      )}
+
+      {/* TABS */}
+      <div style={styles.tabs}>
+        {['courses', 'materials', 'students', 'enrollments'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            style={styles.tab(activeTab === tab)}
+          >
+            {tab === 'courses' && '📚 Courses'}
+            {tab === 'materials' && '📄 Materials'}
+            {tab === 'students' && '👥 Students'}
+            {tab === 'enrollments' && '📋 Enrollments'}
+          </button>
+        ))}
+      </div>
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* COURSES TAB */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {activeTab === 'courses' && (
+        <div>
+          <button
+            onClick={() => {
+              setShowCourseForm(!showCourseForm);
+              setCourseForm({ name: '', subject: '', description: '' });
+              setEditingCourseId(null);
+            }}
+            style={styles.button('primary')}
+          >
+            {showCourseForm ? '✕ Cancel' : '➕ Add Course'}
+          </button>
+
+          {showCourseForm && (
+            <div style={{ ...styles.card, background: '#f8fafc', marginTop: '1rem' }}>
+              <h3 style={{ marginTop: 0 }}>
+                {editingCourseId ? 'Edit Course' : 'Create New Course'}
+              </h3>
+              <div style={styles.formGrid}>
+                <input
+                  type="text"
+                  placeholder="Course Name"
+                  value={courseForm.name}
+                  onChange={e => setCourseForm({ ...courseForm, name: e.target.value })}
+                  style={styles.input}
+                />
+                <input
+                  type="text"
+                  placeholder="Subject"
+                  value={courseForm.subject}
+                  onChange={e => setCourseForm({ ...courseForm, subject: e.target.value })}
+                  style={styles.input}
+                />
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Tabs */}
-        <div style={{ display:'flex', gap:'0.375rem', background:'#f1f5f9', padding:'0.375rem', borderRadius:'12px', width:'fit-content', marginBottom:'1.5rem' }}>
-          {tabs.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              style={{ padding:'0.5rem 1.25rem', borderRadius:'9px', border:'none', fontSize:'0.875rem', fontWeight:'500', cursor:'pointer', background: activeTab===tab.id ? '#fff' : 'none', color: activeTab===tab.id ? '#0f172a' : '#64748b', boxShadow: activeTab===tab.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition:'all 0.15s', display:'flex', alignItems:'center', gap:'0.5rem' }}
-            >
-              {tab.label}
-              {tab.count !== null && (
-                <span style={{ background: activeTab===tab.id ? '#eff6ff' : '#e2e8f0', color: activeTab===tab.id ? '#6366f1' : '#64748b', fontSize:'0.75rem', padding:'0.1rem 0.5rem', borderRadius:'20px' }}>
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Courses Tab */}
-        {activeTab==='courses' && (
-          <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
-            <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.5rem' }}>
-              <h3 style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 1rem', fontSize:'0.95rem' }}>Create new course</h3>
-              <form onSubmit={createCourse} style={{ display:'flex', gap:'0.75rem', flexWrap:'wrap' }}>
-                <input value={newCourse.name} onChange={e => setNewCourse({...newCourse,name:e.target.value})} placeholder="Course name (e.g. Studio 5)" required style={{ ...inputStyle, flex:1, minWidth:'200px' }} />
-                <input value={newCourse.subject} onChange={e => setNewCourse({...newCourse,subject:e.target.value})} placeholder="Subject" style={{ ...inputStyle, flex:1, minWidth:'150px' }} />
-                <button type="submit" disabled={loading} style={{ padding:'0.65rem 1.25rem', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff', border:'none', borderRadius:'10px', fontSize:'0.875rem', fontWeight:'600', cursor:'pointer', whiteSpace:'nowrap' }}>
-                  {loading ? 'Creating...' : '+ Create Course'}
+              <textarea
+                placeholder="Description"
+                value={courseForm.description}
+                onChange={e => setCourseForm({ ...courseForm, description: e.target.value })}
+                style={{ ...styles.input, minHeight: '80px', resize: 'vertical' }}
+              />
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  onClick={handleSaveCourse}
+                  disabled={loading}
+                  style={styles.button('primary')}
+                >
+                  {loading ? '⏳ Saving...' : '💾 Save'}
                 </button>
-              </form>
-            </div>
-
-            <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', overflow:'hidden' }}>
-              <div style={{ padding:'1rem 1.5rem', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <h3 style={{ fontWeight:'600', color:'#0f172a', margin:0, fontSize:'0.95rem' }}>All Courses</h3>
-                <span style={{ fontSize:'0.8rem', color:'#64748b' }}>{courses.length} total</span>
+                <button
+                  onClick={() => {
+                    setShowCourseForm(false);
+                    setEditingCourseId(null);
+                  }}
+                  style={styles.button()}
+                >
+                  Cancel
+                </button>
               </div>
-              {courses.length === 0 ? (
-                <p style={{ textAlign:'center', color:'#9ca3af', padding:'2rem', margin:0 }}>No courses yet. Create one above.</p>
-              ) : courses.map((course,i) => (
-                <div key={course.id} style={{ padding:'1rem 1.5rem', borderBottom: i < courses.length-1 ? '1px solid #f8fafc' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <div>
-                    <p style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 0.2rem', fontSize:'0.9rem' }}>{course.name}</p>
-                    <p style={{ color:'#9ca3af', margin:0, fontSize:'0.75rem', fontFamily:'monospace' }}>{course.id}</p>
-                  </div>
-                  <div style={{ display:'flex', gap:'0.5rem' }}>
-                    <span style={{ background:'#eff6ff', color:'#6366f1', fontSize:'0.75rem', fontWeight:'600', padding:'0.25rem 0.75rem', borderRadius:'20px' }}>{course._count?.enrollments||0} students</span>
-                    <span style={{ background:'#f1f5f9', color:'#64748b', fontSize:'0.75rem', fontWeight:'600', padding:'0.25rem 0.75rem', borderRadius:'20px' }}>{course._count?.materials||0} materials</span>
-                  </div>
-                </div>
-              ))}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Students Tab */}
-        {activeTab==='students' && (
-          <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', overflow:'hidden' }}>
-            <div style={{ padding:'1rem 1.5rem', borderBottom:'1px solid #f1f5f9' }}>
-              <h3 style={{ fontWeight:'600', color:'#0f172a', margin:0, fontSize:'0.95rem' }}>All Students</h3>
-            </div>
-            {users.map((u,i) => (
-              <div key={u.id} style={{ padding:'1rem 1.5rem', borderBottom: i < users.length-1 ? '1px solid #f8fafc' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
-                  <div style={{ width:'36px', height:'36px', background:'#eff6ff', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'700', fontSize:'13px', color:'#6366f1' }}>
-                    {u.name?.charAt(0).toUpperCase()}
-                  </div>
+          <div style={{ marginTop: '1.5rem' }}>
+            {courses.map(course => (
+              <div key={course.id} style={styles.card}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <p style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 0.1rem', fontSize:'0.875rem' }}>{u.name}</p>
-                    <p style={{ color:'#9ca3af', margin:0, fontSize:'0.75rem' }}>{u.email}</p>
+                    <h3 style={{ margin: '0 0 0.5rem', color: '#0f172a' }}>{course.name}</h3>
+                    <p style={{ margin: '0.25rem 0', color: '#64748b', fontSize: '0.9rem' }}>
+                      📚 {course._count?.materials || 0} materials · 👥 {course._count?.enrollments || 0} students
+                    </p>
+                    {course.description && (
+                      <p style={{ margin: '0.5rem 0 0', color: '#475569', fontSize: '0.85rem' }}>
+                        {course.description}
+                      </p>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      onClick={() => {
+                        setExpandedCourseId(expandedCourseId === course.id ? null : course.id);
+                        if (expandedCourseId !== course.id) {
+                          loadCourseMaterials(course.id);
+                        }
+                      }}
+                      style={styles.button()}
+                    >
+                      {expandedCourseId === course.id ? '▼' : '▶'} View
+                    </button>
+                    <button
+                      onClick={() => handleEditCourse(course)}
+                      style={styles.button()}
+                    >
+                      ✏️ Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCourse(course.id)}
+                      style={styles.button('danger')}
+                    >
+                      🗑️ Delete
+                    </button>
                   </div>
                 </div>
-                <span style={{ background: u.role==='ADMIN' ? '#f5f3ff' : '#f1f5f9', color: u.role==='ADMIN' ? '#7c3aed' : '#64748b', fontSize:'0.75rem', fontWeight:'600', padding:'0.25rem 0.75rem', borderRadius:'20px' }}>
-                  {u.role==='ADMIN' ? 'Admin' : 'Student'}
-                </span>
+
+                {expandedCourseId === course.id && (
+                  <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
+                    <h4 style={{ marginTop: 0, color: '#475569' }}>Materials in this course:</h4>
+                    {courseMaterials[course.id]?.length === 0 ? (
+                      <p style={{ color: '#94a3b8' }}>No materials uploaded yet</p>
+                    ) : (
+                      <ul style={{ margin: '0.5rem 0', paddingLeft: '1.25rem' }}>
+                        {courseMaterials[course.id]?.map(material => (
+                          <li key={material.id} style={{ color: '#475569', marginBottom: '0.25rem' }}>
+                            <strong>{material.title}</strong> ({material.chunkCount} chunks)
+                            <button
+                              onClick={() => handleDeleteMaterial(material.id, course.id)}
+                              style={{
+                                marginLeft: '0.5rem',
+                                padding: '0.2rem 0.5rem',
+                                background: '#fee2e2',
+                                color: '#991b1b',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Enroll Tab */}
-        {activeTab==='enroll' && (
-          <div style={{ background:'#fff', borderRadius:'16px', border:'1px solid #e2e8f0', padding:'1.5rem', maxWidth:'480px' }}>
-            <h3 style={{ fontWeight:'600', color:'#0f172a', margin:'0 0 0.35rem', fontSize:'0.95rem' }}>Enroll a student</h3>
-            <p style={{ color:'#64748b', margin:'0 0 1.25rem', fontSize:'0.85rem' }}>Assign a student to a course so they can access the AI tutor.</p>
-            <form onSubmit={enrollStudent} style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
-              <div>
-                <label style={{ display:'block', fontSize:'0.8rem', fontWeight:'500', color:'#374151', marginBottom:'0.4rem' }}>Student</label>
-                <select value={enrollForm.userId} onChange={e => setEnrollForm({...enrollForm,userId:e.target.value})} required style={selectStyle}>
-                  <option value="">Select student...</option>
-                  {users.filter(u => u.role!=='ADMIN').map(u => (
-                    <option key={u.id} value={u.id}>{u.name} — {u.email}</option>
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* MATERIALS TAB */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {activeTab === 'materials' && (
+        <div>
+          <div style={{ background: '#fff3cd', padding: '1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #ffc107' }}>
+            <strong>📌 Note:</strong> Material upload requires the Upload Materials page. Use the "Upload Materials" button in the navbar to upload files for courses.
+          </div>
+          <button
+            onClick={() => navigate('/admin/upload')}
+            style={styles.button('primary')}
+          >
+            📤 Go to Upload Materials
+          </button>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* STUDENTS TAB */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {activeTab === 'students' && (
+        <div>
+          <button
+            onClick={() => {
+              setShowStudentForm(!showStudentForm);
+              setStudentForm({ name: '', email: '', password: '', role: 'STUDENT' });
+              setEditingStudentId(null);
+            }}
+            style={styles.button('primary')}
+          >
+            {showStudentForm ? '✕ Cancel' : '➕ Add Student'}
+          </button>
+
+          {showStudentForm && (
+            <div style={{ ...styles.card, background: '#f8fafc', marginTop: '1rem' }}>
+              <h3 style={{ marginTop: 0 }}>Add New Student</h3>
+              <div style={styles.formGrid}>
+                <input
+                  type="text"
+                  placeholder="Student Name"
+                  value={studentForm.name}
+                  onChange={e => setStudentForm({ ...studentForm, name: e.target.value })}
+                  style={styles.input}
+                />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={studentForm.email}
+                  onChange={e => setStudentForm({ ...studentForm, email: e.target.value })}
+                  style={styles.input}
+                />
+                <input
+                  type="password"
+                  placeholder="Temporary Password"
+                  value={studentForm.password}
+                  onChange={e => setStudentForm({ ...studentForm, password: e.target.value })}
+                  style={styles.input}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  onClick={handleSaveStudent}
+                  disabled={loading}
+                  style={styles.button('primary')}
+                >
+                  {loading ? '⏳ Creating...' : '✅ Create Student'}
+                </button>
+                <button
+                  onClick={() => setShowStudentForm(false)}
+                  style={styles.button()}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginTop: '1.5rem' }}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #e2e8f0' }}>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Name</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Email</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Role</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {students.map(student => (
+                  <tr key={student.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                    <td style={{ padding: '0.75rem', color: '#0f172a' }}>{student.name}</td>
+                    <td style={{ padding: '0.75rem', color: '#64748b', fontSize: '0.9rem' }}>{student.email}</td>
+                    <td style={{ padding: '0.75rem' }}>
+                      <span style={{
+                        background: student.role === 'ADMIN' ? '#ede9fe' : '#dbeafe',
+                        color: student.role === 'ADMIN' ? '#7c3aed' : '#0369a1',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '20px',
+                        fontSize: '0.8rem',
+                        fontWeight: '600'
+                      }}>
+                        {student.role}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.75rem' }}>
+                      <button
+                        onClick={() => handleDeleteStudent(student.id, student.email)}
+                        style={styles.button('danger')}
+                      >
+                        🗑️ Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* ENROLLMENTS TAB */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {activeTab === 'enrollments' && (
+        <div>
+          <button
+            onClick={() => {
+              setShowEnrollForm(!showEnrollForm);
+              setEnrollForm({ userId: '', courseId: '' });
+            }}
+            style={styles.button('primary')}
+          >
+            {showEnrollForm ? '✕ Cancel' : '➕ Enroll Student'}
+          </button>
+
+          {showEnrollForm && (
+            <div style={{ ...styles.card, background: '#f8fafc', marginTop: '1rem' }}>
+              <h3 style={{ marginTop: 0 }}>Enroll Student in Course</h3>
+              <div style={styles.formGrid}>
+                <select
+                  value={enrollForm.userId}
+                  onChange={e => setEnrollForm({ ...enrollForm, userId: e.target.value })}
+                  style={styles.input}
+                >
+                  <option value="">Select Student</option>
+                  {students.map(student => (
+                    <option key={student.id} value={student.id}>
+                      {student.name} ({student.email})
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={enrollForm.courseId}
+                  onChange={e => setEnrollForm({ ...enrollForm, courseId: e.target.value })}
+                  style={styles.input}
+                >
+                  <option value="">Select Course</option>
+                  {courses.map(course => (
+                    <option key={course.id} value={course.id}>
+                      {course.name}
+                    </option>
                   ))}
                 </select>
               </div>
-              <div>
-                <label style={{ display:'block', fontSize:'0.8rem', fontWeight:'500', color:'#374151', marginBottom:'0.4rem' }}>Course</label>
-                <select value={enrollForm.courseId} onChange={e => setEnrollForm({...enrollForm,courseId:e.target.value})} required style={selectStyle}>
-                  <option value="">Select course...</option>
-                  {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  onClick={handleEnrollStudent}
+                  disabled={loading}
+                  style={styles.button('primary')}
+                >
+                  {loading ? '⏳ Enrolling...' : '✅ Enroll'}
+                </button>
+                <button
+                  onClick={() => setShowEnrollForm(false)}
+                  style={styles.button()}
+                >
+                  Cancel
+                </button>
               </div>
-              <button type="submit" disabled={loading} style={{ padding:'0.75rem', background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff', border:'none', borderRadius:'10px', fontSize:'0.9rem', fontWeight:'600', cursor:'pointer' }}>
-                {loading ? 'Enrolling...' : 'Enroll Student →'}
-              </button>
-            </form>
+            </div>
+          )}
+
+          <div style={{ marginTop: '1.5rem' }}>
+            <table style={styles.table}>
+              <thead>
+                <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #e2e8f0' }}>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Student</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Course</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Enrolled Date</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.9rem', fontWeight: '600', color: '#475569' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {enrollments.map(enrollment => (
+                  <tr key={enrollment.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                    <td style={{ padding: '0.75rem' }}>
+                      <div style={{ color: '#0f172a', fontWeight: '500' }}>{enrollment.user?.name}</div>
+                      <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{enrollment.user?.email}</div>
+                    </td>
+                    <td style={{ padding: '0.75rem', color: '#0f172a' }}>{enrollment.course?.name}</td>
+                    <td style={{ padding: '0.75rem', color: '#64748b', fontSize: '0.9rem' }}>
+                      {new Date(enrollment.createdAt).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: '0.75rem' }}>
+                      <button
+                        onClick={() => handleRemoveEnrollment(enrollment.id)}
+                        style={styles.button('danger')}
+                      >
+                        ❌ Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
-      </main>
+        </div>
+      )}
     </div>
   );
 }
