@@ -35,6 +35,9 @@ const upload = multer({
   }
 });
 
+// ============================================================
+// UPLOAD MATERIAL — POST /api/materials/upload
+// ============================================================
 router.post(
   '/upload',
   authenticateToken,
@@ -49,35 +52,143 @@ router.post(
     if (!courseId || !title)
       return res.status(400).json({ error: 'courseId and title required' });
 
-    const material = await prisma.material.create({
-      data: {
-        courseId,
-        title,
-        type: req.file.mimetype,
-        filePath: req.file.path,
-        topic: topic || null,
-        week: week ? parseInt(week) : null
-      }
-    });
+    try {
+      const material = await prisma.material.create({
+        data: {
+          courseId,
+          title,
+          type: req.file.mimetype,
+          filePath: req.file.path,
+          topic: topic || null,
+          week: week ? parseInt(week) : null
+        }
+      });
 
-    // Process material in background (dont wait for it)
-    processMaterial(material).catch(console.error);
+      console.log(`📤 Material created: ${material.id} - ${title}`);
+      console.log(`🔄 Starting background processing...`);
 
-    res.status(201).json({
-      message: 'File uploaded and being processed for AI search',
-      material
-    });
+      // Process material in background BUT track completion
+      processMaterial(material)
+        .then(() => {
+          console.log(`✅ Material processing complete: ${title}`);
+        })
+        .catch((err) => {
+          console.error(`❌ Material processing FAILED for ${title}:`, err.message);
+          // Log to database for debugging
+          console.error(err.stack);
+        });
+
+      res.status(201).json({
+        message: 'File uploaded and being processed for AI search',
+        material,
+        note: 'Processing in background. Check server logs for progress.'
+      });
+    } catch (err) {
+      console.error('❌ Upload error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   }
 );
 
-// POST /api/materials/summarise
+// ============================================================
+// DEBUG — Check if chunks exist for a course
+// ============================================================
+router.get('/debug/chunks', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { courseId } = req.query;
+
+    const chunks = await prisma.materialChunk.findMany({
+      where: { courseId },
+      select: {
+        id: true,
+        materialTitle: true,
+        chunkIndex: true,
+        text: true,
+        embedding: true,
+        createdAt: true
+      },
+      take: 10
+    });
+
+    const totalChunks = await prisma.materialChunk.count({
+      where: { courseId }
+    });
+
+    const materials = await prisma.material.findMany({
+      where: { courseId },
+      select: { id: true, title: true, createdAt: true }
+    });
+
+    res.json({
+      totalChunks,
+      chunksSample: chunks.map(c => ({
+        ...c,
+        embedding: c.embedding ? `[${c.embedding.slice(0, 3).join(', ')}...]` : null,
+        textPreview: c.text.substring(0, 100)
+      })),
+      materials
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// DEBUG — Force reprocess a material
+// ============================================================
+router.post('/debug/reprocess', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { materialId } = req.body;
+
+    if (!materialId) {
+      return res.status(400).json({ error: 'materialId required' });
+    }
+
+    const material = await prisma.material.findUnique({
+      where: { id: materialId }
+    });
+
+    if (!material) {
+      return res.status(404).json({ error: 'Material not found' });
+    }
+
+    // Delete existing chunks for this material
+    const deleted = await prisma.materialChunk.deleteMany({
+      where: { materialId }
+    });
+
+    console.log(`🗑️  Deleted ${deleted.count} existing chunks`);
+
+    // Reprocess
+    console.log(`♻️  Reprocessing material: ${material.title}`);
+    await processMaterial(material);
+
+    // Check results
+    const newChunks = await prisma.materialChunk.count({
+      where: { materialId }
+    });
+
+    res.json({
+      message: 'Material reprocessed',
+      deletedChunks: deleted.count,
+      newChunks
+    });
+  } catch (err) {
+    console.error('❌ Reprocess error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// SUMMARISE — POST /api/materials/summarise
+// ============================================================
 router.post('/summarise', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId } = req.body;
   if (!courseId) return res.status(400).json({ error: 'courseId required' });
 
   try {
     const { searchMaterials } = require('../services/ragService');
-    const { chat }            = require('../services/openaiService');
+    const { chat } = require('../services/openaiService');
 
     const chunks = await searchMaterials('key concepts summary overview main topics', courseId);
     if (chunks.length === 0) {
@@ -108,6 +219,9 @@ ${context}`;
   }
 });
 
+// ============================================================
+// LIST MATERIALS — GET /api/materials
+// ============================================================
 router.get('/', authenticateToken, checkEnrollment, async (req, res) => {
   const { courseId } = req.query;
   const materials = await prisma.material.findMany({

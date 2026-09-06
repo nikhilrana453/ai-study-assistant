@@ -1,8 +1,7 @@
 // ============================================================
-// vectorService.js — PostgreSQL pgvector Implementation
+// vectorService.js — PostgreSQL pgvector Implementation 
 // ============================================================
-// Replaces ChromaDB. Uses Neon PostgreSQL with pgvector extension
-// for all vector operations (storage + similarity search)
+// Bug fix: Proper embedding casting and search without distance threshold
 // ============================================================
 
 const prisma = require('../prismaClient');
@@ -16,11 +15,14 @@ const prisma = require('../prismaClient');
  */
 const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
   try {
-    // Convert embedding array to pgvector format: [x,y,z]
+    console.log(`🔍 Searching for similar documents in course: ${courseId}`);
+    console.log(`📊 Query embedding dimensions: ${queryEmbedding.length}`);
+
+    // Convert embedding to string format for pgvector
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
-    // Use raw SQL for pgvector cosine similarity search
-    // <=> operator = cosine distance (0 = identical, 2 = opposite)
+    // FIXED: Direct raw SQL without subqueries
+    // Use CAST to ensure proper vector type conversion
     const results = await prisma.$queryRaw`
       SELECT
         id,
@@ -32,23 +34,27 @@ const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
         topic,
         week,
         "chunkIndex",
-        -- Calculate cosine distance (lower = more similar)
         (embedding <=> ${embeddingStr}::vector) AS distance
       FROM "MaterialChunk"
       WHERE "courseId" = ${courseId}
-      -- Filter by distance threshold (0-2 scale, lower = better)
-      AND (embedding <=> ${embeddingStr}::vector) < 1.8
+      AND embedding IS NOT NULL
       ORDER BY distance ASC
       LIMIT ${limit}
     `;
 
+    console.log(`📊 Raw search returned ${results.length} results`);
+
     if (!results || results.length === 0) {
-      console.log(`No matching documents found for course ${courseId}`);
+      console.log(`⚠️  No results found for course ${courseId}`);
       return { documents: [[]], metadatas: [[]], distances: [[]] };
     }
 
+    // Log the distances for debugging
+    results.forEach((r, i) => {
+      console.log(`  [${i + 1}] Distance: ${parseFloat(r.distance).toFixed(2)} | "${r.materialTitle}" | ${r.text.substring(0, 50)}...`);
+    });
+
     // Format results to match ChromaDB-like response structure
-    // This maintains compatibility with ragService.js
     const documents = results.map(r => r.text);
     const metadatas = results.map(r => ({
       materialId: r.materialId,
@@ -58,23 +64,38 @@ const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
       week: r.week || '',
       chunkIndex: r.chunkIndex
     }));
-    const distances = results.map(r => r.distance);
+    const distances = results.map(r => parseFloat(r.distance));
 
-    console.log(`✅ Found ${documents.length} similar chunks (distance < 1.8)`);
-
-    return {
-      documents: [documents],
-      metadatas: [metadatas],
-      distances: [distances]
+    // Filter by distance threshold (cosine distance < 1.8 is good match)
+    const filtered = distances.map((d, i) => i).filter(i => distances[i] < 1.8);
+    const filteredResults = {
+      documents: [filtered.map(i => documents[i])],
+      metadatas: [filtered.map(i => metadatas[i])],
+      distances: [filtered.map(i => distances[i])]
     };
+
+    console.log(`✅ Found ${filteredResults.documents[0].length} results with distance < 1.8`);
+
+    // If no results with strict threshold, return top 3 anyway
+    if (filteredResults.documents[0].length === 0 && results.length > 0) {
+      console.log(`⚠️  No results under distance threshold, returning top ${Math.min(3, results.length)} anyway`);
+      return {
+        documents: [[...documents.slice(0, 3)]],
+        metadatas: [[...metadatas.slice(0, 3)]],
+        distances: [[...distances.slice(0, 3)]]
+      };
+    }
+
+    return filteredResults;
 
   } catch (error) {
     console.error('❌ Vector search error:', error.message);
+    console.error(error.stack);
 
     // If pgvector not installed, give helpful error
     if (error.message.includes('vector')) {
-      console.error('⚠️  pgvector extension may not be installed in Neon.');
-      console.error('Run: CREATE EXTENSION IF NOT EXISTS vector;');
+      console.error('⚠️  pgvector extension may not be installed or working correctly.');
+      console.error('Run in Neon: CREATE EXTENSION IF NOT EXISTS vector;');
     }
 
     return { documents: [[]], metadatas: [[]], distances: [[]] };
@@ -87,6 +108,8 @@ const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
  */
 const addDocuments = async (courseId, documents) => {
   try {
+    console.log(`💾 Storing ${documents.length} documents in PostgreSQL...`);
+
     // Prisma doesn't handle pgvector insertion well,
     // so use raw SQL for bulk insert
     for (const doc of documents) {
@@ -121,11 +144,12 @@ const addDocuments = async (courseId, documents) => {
       `;
     }
 
-    console.log(`✅ Stored ${documents.length} document chunks in PostgreSQL`);
+    console.log(`✅ Successfully stored ${documents.length} document chunks in PostgreSQL`);
     return true;
 
   } catch (error) {
     console.error('❌ Error storing documents:', error.message);
+    console.error(error.stack);
     throw error;
   }
 };
