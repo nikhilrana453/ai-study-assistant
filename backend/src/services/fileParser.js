@@ -8,7 +8,7 @@ const path = require('path');
 // PDF extraction using pdf-parse
 const extractPDF = async (filePath) => {
   try {
-    const pdfParse = require('pdf-parse');
+    const pdfParse = require('pdf-parse/lib/pdf.js');
     const fileBuffer = fs.readFileSync(filePath);
     const data = await pdfParse(fileBuffer);
 
