@@ -1,7 +1,10 @@
 // ============================================================
-// vectorService.js — PostgreSQL pgvector Implementation 
+// vectorService.js — PostgreSQL pgvector Implementation
 // ============================================================
-// Bug fix: Proper embedding casting and search without distance threshold
+// Fix: do NOT select the `embedding` column. Prisma cannot
+// deserialize Unsupported("vector(1536)") back into JS, which
+// made every search throw. The distance is computed in SQL,
+// so the raw vector is never needed on the JS side.
 // ============================================================
 
 const prisma = require('../prismaClient');
@@ -11,23 +14,22 @@ const prisma = require('../prismaClient');
  * @param {string} courseId - Course ID to filter by
  * @param {number[]} queryEmbedding - The query embedding vector
  * @param {number} limit - Number of results to return
- * @returns {Promise<Array>} - Similar chunks with metadata and distance
+ * @returns {Promise<Object>} - Similar chunks with metadata and distance
  */
 const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
   try {
     console.log(`🔍 Searching for similar documents in course: ${courseId}`);
     console.log(`📊 Query embedding dimensions: ${queryEmbedding.length}`);
 
-    // Convert embedding to string format for pgvector
     const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
-    // FIXED: Direct raw SQL without subqueries
-    // Use CAST to ensure proper vector type conversion
+    // NOTE: `embedding` is deliberately absent from the SELECT list.
+    // Selecting it triggers:
+    //   "Failed to deserialize column of type 'vector'"
     const results = await prisma.$queryRaw`
       SELECT
         id,
         text,
-        embedding,
         "materialId",
         "materialTitle",
         "courseId",
@@ -37,7 +39,7 @@ const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
         (embedding <=> ${embeddingStr}::vector) AS distance
       FROM "MaterialChunk"
       WHERE "courseId" = ${courseId}
-      AND embedding IS NOT NULL
+        AND embedding IS NOT NULL
       ORDER BY distance ASC
       LIMIT ${limit}
     `;
@@ -45,16 +47,16 @@ const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
     console.log(`📊 Raw search returned ${results.length} results`);
 
     if (!results || results.length === 0) {
-      console.log(`⚠️  No results found for course ${courseId}`);
+      console.log(`⚠️  No chunks stored for course ${courseId}`);
       return { documents: [[]], metadatas: [[]], distances: [[]] };
     }
 
-    // Log the distances for debugging
     results.forEach((r, i) => {
-      console.log(`  [${i + 1}] Distance: ${parseFloat(r.distance).toFixed(2)} | "${r.materialTitle}" | ${r.text.substring(0, 50)}...`);
+      console.log(
+        `  [${i + 1}] Distance: ${parseFloat(r.distance).toFixed(3)} | "${r.materialTitle}" | ${r.text.substring(0, 60)}...`
+      );
     });
 
-    // Format results to match ChromaDB-like response structure
     const documents = results.map(r => r.text);
     const metadatas = results.map(r => ({
       materialId: r.materialId,
@@ -66,36 +68,36 @@ const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
     }));
     const distances = results.map(r => parseFloat(r.distance));
 
-    // Filter by distance threshold (cosine distance < 1.8 is good match)
-    const filtered = distances.map((d, i) => i).filter(i => distances[i] < 1.8);
-    const filteredResults = {
-      documents: [filtered.map(i => documents[i])],
-      metadatas: [filtered.map(i => metadatas[i])],
-      distances: [filtered.map(i => distances[i])]
-    };
+    // Quality filter: cosine distance < 1.8 counts as a usable match
+    const keep = distances.map((_, i) => i).filter(i => distances[i] < 1.8);
 
-    console.log(`✅ Found ${filteredResults.documents[0].length} results with distance < 1.8`);
+    console.log(`✅ ${keep.length} of ${results.length} results under distance 1.8`);
 
-    // If no results with strict threshold, return top 3 anyway
-    if (filteredResults.documents[0].length === 0 && results.length > 0) {
-      console.log(`⚠️  No results under distance threshold, returning top ${Math.min(3, results.length)} anyway`);
+    // Fallback: if nothing clears the bar, still hand back the best few
+    // rather than letting the assistant claim the topic is out of scope.
+    if (keep.length === 0) {
+      console.log(`⚠️  Nothing under threshold — returning top ${Math.min(3, results.length)} anyway`);
       return {
-        documents: [[...documents.slice(0, 3)]],
-        metadatas: [[...metadatas.slice(0, 3)]],
-        distances: [[...distances.slice(0, 3)]]
+        documents: [documents.slice(0, 3)],
+        metadatas: [metadatas.slice(0, 3)],
+        distances: [distances.slice(0, 3)]
       };
     }
 
-    return filteredResults;
+    return {
+      documents: [keep.map(i => documents[i])],
+      metadatas: [keep.map(i => metadatas[i])],
+      distances: [keep.map(i => distances[i])]
+    };
 
   } catch (error) {
     console.error('❌ Vector search error:', error.message);
     console.error(error.stack);
 
-    // If pgvector not installed, give helpful error
-    if (error.message.includes('vector')) {
-      console.error('⚠️  pgvector extension may not be installed or working correctly.');
-      console.error('Run in Neon: CREATE EXTENSION IF NOT EXISTS vector;');
+    if (error.message.includes('deserialize')) {
+      console.error('⚠️  A vector column was included in the SELECT list. Remove it — distance is computed in SQL.');
+    } else if (error.message.includes('type "vector" does not exist')) {
+      console.error('⚠️  pgvector is not enabled. Run in Neon: CREATE EXTENSION IF NOT EXISTS vector;');
     }
 
     return { documents: [[]], metadatas: [[]], distances: [[]] };
@@ -103,17 +105,13 @@ const searchDocuments = async (courseId, queryEmbedding, limit = 5) => {
 };
 
 /**
- * Add/store documents with embeddings in PostgreSQL
- * (Called by ragService.js during material processing)
+ * Store document chunks with embeddings
  */
 const addDocuments = async (courseId, documents) => {
   try {
     console.log(`💾 Storing ${documents.length} documents in PostgreSQL...`);
 
-    // Prisma doesn't handle pgvector insertion well,
-    // so use raw SQL for bulk insert
     for (const doc of documents) {
-      // Convert embedding array to pgvector format
       const embeddingStr = `[${doc.embedding.join(',')}]`;
 
       await prisma.$executeRaw`
@@ -155,13 +153,11 @@ const addDocuments = async (courseId, documents) => {
 };
 
 /**
- * Clear all chunks for a specific course (for re-indexing)
+ * Clear all chunks for a course (for re-indexing)
  */
 const clearCourse = async (courseId) => {
   try {
-    const result = await prisma.materialChunk.deleteMany({
-      where: { courseId }
-    });
+    const result = await prisma.materialChunk.deleteMany({ where: { courseId } });
     console.log(`✅ Cleared ${result.count} chunks for course ${courseId}`);
     return result.count;
   } catch (error) {
@@ -171,7 +167,7 @@ const clearCourse = async (courseId) => {
 };
 
 /**
- * Get collection (no-op for pgvector, kept for compatibility)
+ * Kept for interface compatibility
  */
 const getCollection = async (courseId) => {
   return { courseId };
