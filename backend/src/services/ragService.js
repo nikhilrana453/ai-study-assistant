@@ -1,7 +1,16 @@
 // ============================================================
 // ragService.js — Retrieval-Augmented Generation Service
 // ============================================================
-// Now uses PostgreSQL + pgvector instead of ChromaDB
+// PostgreSQL + pgvector
+//
+// Changes:
+//  - Removed query expansion. chat.js already had its own, so
+//    questions containing "control" were expanded twice and the
+//    embedding drifted toward generic "objectives/outcomes" text.
+//  - Removed the duplicate distance filter. vectorService already
+//    filters and provides a top-3 fallback; re-filtering here
+//    discarded that fallback and made it dead code.
+//  - Default retrieval raised from 5 to 8 chunks.
 // ============================================================
 
 const { embed } = require('./openaiService');
@@ -10,7 +19,7 @@ const { extractText } = require('./fileParser');
 
 // ── Topic-based chunking ───────────────────────────────────────────────────
 // Splits on double newlines (paragraph/slide breaks) instead of word count
-// This keeps related content together in the same chunk
+// so related content stays together in the same chunk
 const chunkByTopic = (text) => {
   const sections = text.split(/\n\n+/);
   const chunks   = [];
@@ -60,7 +69,6 @@ const processMaterial = async (material) => {
   try {
     console.log(`📄 Processing material: ${material.title}`);
 
-    // Extract text from file (PDF, Word, etc)
     const text = await extractText(material.filePath, material.type);
     if (!text || text.trim().length === 0) {
       console.log('❌ No text extracted from file');
@@ -69,7 +77,6 @@ const processMaterial = async (material) => {
 
     console.log(`✂️  Extracted ${text.length} characters`);
 
-    // Use topic-based chunking to preserve context
     const chunks = chunkByTopic(text);
     console.log(`🔀 Created ${chunks.length} chunks`);
 
@@ -78,7 +85,6 @@ const processMaterial = async (material) => {
       const chunk = chunks[i];
       if (chunk.trim().length < 10) continue;
 
-      // Generate embedding using OpenAI
       console.log(`  📊 Embedding chunk ${i + 1}/${chunks.length}...`);
       const embedding = await embed(chunk);
 
@@ -97,7 +103,6 @@ const processMaterial = async (material) => {
       });
     }
 
-    // Store all chunks in PostgreSQL with pgvector
     if (documents.length > 0) {
       await addDocuments(material.courseId, documents);
       console.log(`✅ Stored ${documents.length} chunks for "${material.title}"`);
@@ -109,49 +114,38 @@ const processMaterial = async (material) => {
 };
 
 // ── Search for relevant materials ─────────────────────────────────────────
-// Uses pgvector cosine similarity search
-const searchMaterials = async (question, courseId) => {
+// The question is embedded AS ASKED. Do not append keyword filler here —
+// it dilutes the query vector and pulls results toward whatever generic
+// text those keywords resemble.
+const searchMaterials = async (question, courseId, limit = 8) => {
   try {
     console.log(`🔍 Searching for: "${question}"`);
 
-    // Expand query for scope/objective type questions
-    const scopeKeywords = ['scope', 'learn', 'objective', 'outcome', 'module', 'topic', 'cover', 'should', 'measuring', 'control', 'countermeasure'];
-    const isScopeQuestion = scopeKeywords.some(k => question.toLowerCase().includes(k));
-    const searchQuery = isScopeQuestion
-      ? question + ' controls measuring countermeasure objectives outcomes'
-      : question;
-
-    console.log(`📝 Search query: "${searchQuery}"`);
-
-    // Get embedding for the question
     console.log(`🔑 Generating query embedding...`);
-    const queryEmbedding = await embed(searchQuery);
+    const queryEmbedding = await embed(question);
 
-    // Search using pgvector similarity (returns top 5)
-    console.log(`🗄️  Querying PostgreSQL pgvector...`);
-    const results = await searchDocuments(courseId, queryEmbedding, 5);
+    console.log(`🗄️  Querying PostgreSQL pgvector (limit ${limit})...`);
+    const results = await searchDocuments(courseId, queryEmbedding, limit);
 
     if (!results || !results.documents || results.documents[0].length === 0) {
-      console.log(`⚠️  No relevant chunks found for course ${courseId}`);
+      console.log(`⚠️  No chunks returned for course ${courseId}`);
       return [];
     }
 
-    // Format results
+    // vectorService has already applied the distance threshold and its
+    // top-3 fallback. Filtering again here would discard that fallback.
     const chunks = results.documents[0].map((doc, i) => ({
       text:     doc,
       metadata: results.metadatas[0][i],
       distance: results.distances[0][i]
     }));
 
-    // Filter by distance threshold (cosine distance < 1.8 is good)
-    const filtered = chunks.filter(chunk => chunk.distance < 1.8);
-
-    console.log(`✅ Found ${filtered.length} relevant chunks (distance < 1.8)`);
-    filtered.forEach((chunk, i) => {
-      console.log(`  [${i + 1}] Distance: ${chunk.distance.toFixed(2)} | Source: ${chunk.metadata.materialTitle}`);
+    console.log(`✅ Returning ${chunks.length} chunks to the caller`);
+    chunks.forEach((chunk, i) => {
+      console.log(`  [${i + 1}] Distance: ${chunk.distance.toFixed(3)} | Source: ${chunk.metadata.materialTitle}`);
     });
 
-    return filtered;
+    return chunks;
   } catch (err) {
     console.error('❌ Error searching materials:', err.message);
     return [];
