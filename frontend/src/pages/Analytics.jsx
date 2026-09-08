@@ -26,7 +26,8 @@ export default function Analytics() {
           api.get('/admin/stats'),
           api.get('/admin/analytics'),
         ]);
-        setStats(s.data);
+        setStats(s.data);        // before
+        setStats(s.data.stats);  // after
         setAnalytics(a.data);
       } catch (err) {
         console.error(err);

@@ -2,6 +2,17 @@
 // admin.js — Admin CRUD Routes (Delete/Edit Operations)
 // ============================================================
 // Endpoints for managing courses, materials, and enrollments
+//
+// Changes in this version (only /stats and /analytics touched):
+//   /stats     — added aiMessages, thumbsUp, thumbsDown and
+//                satisfactionRate INSIDE the existing `stats`
+//                object. Purely additive, so anything already
+//                reading data.stats.users keeps working.
+//   /analytics — field names now match what the dashboard reads:
+//                  dailyActivity[].date   (ISO, was `day` = "Mon")
+//                  courseStats[].questions/.answers (was `enrollment`)
+//                  recentQuestions[].content/.createdAt
+//                  materialsPerCourse[].enrollments added
 // ============================================================
 
 const express = require('express');
@@ -15,7 +26,7 @@ const { authenticateToken } = require('../middleware/auth');
 const checkAdmin = async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    if (user.role !== 'ADMIN') {
+    if (!user || user.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Admin access required' });
     }
     next();
@@ -79,7 +90,6 @@ router.delete('/courses/:courseId', authenticateToken, checkAdmin, async (req, r
 
     // Delete in order: messages → chatSessions → materials → chunks → enrollments → course
 
-    // 1. Delete all messages in chat sessions for this course
     await prisma.message.deleteMany({
       where: {
         session: {
@@ -88,27 +98,22 @@ router.delete('/courses/:courseId', authenticateToken, checkAdmin, async (req, r
       }
     });
 
-    // 2. Delete all chat sessions for this course
     await prisma.chatSession.deleteMany({
       where: { courseId: courseId }
     });
 
-    // 3. Delete all material chunks for this course
     await prisma.materialChunk.deleteMany({
       where: { courseId: courseId }
     });
 
-    // 4. Delete all materials for this course
     await prisma.material.deleteMany({
       where: { courseId: courseId }
     });
 
-    // 5. Delete all enrollments for this course
     await prisma.enrollment.deleteMany({
       where: { courseId: courseId }
     });
 
-    // 6. Finally, delete the course
     const deletedCourse = await prisma.course.delete({
       where: { id: courseId }
     });
@@ -192,7 +197,6 @@ router.post('/enroll', authenticateToken, checkAdmin, async (req, res) => {
       return res.status(400).json({ error: 'userId and courseId are required' });
     }
 
-    // Check if enrollment already exists
     const existing = await prisma.enrollment.findFirst({
       where: { userId, courseId }
     });
@@ -306,12 +310,10 @@ router.delete('/materials/:materialId', authenticateToken, checkAdmin, async (re
 
     console.log(`🗑️  Deleting material: ${materialId}`);
 
-    // 1. Delete all material chunks (cascading delete should handle this)
     await prisma.materialChunk.deleteMany({
       where: { materialId: materialId }
     });
 
-    // 2. Delete the material
     const deletedMaterial = await prisma.material.delete({
       where: { id: materialId }
     });
@@ -369,7 +371,6 @@ router.delete('/users/:userId', authenticateToken, checkAdmin, async (req, res) 
 
     console.log(`🗑️  Deleting user: ${userId}`);
 
-    // Delete related data first
     await prisma.enrollment.deleteMany({ where: { userId } });
     await prisma.bookmark.deleteMany({ where: { userId } });
     await prisma.passwordResetToken.deleteMany({ where: { userId } });
@@ -390,23 +391,73 @@ router.delete('/users/:userId', authenticateToken, checkAdmin, async (req, res) 
 });
 
 // ============================================================
-// DATABASE STATS (for testing)
+// HELPER — Feedback counts
+// ============================================================
+// Guarded deliberately. If there is no Feedback model on the Prisma
+// client, `prisma.feedback` is undefined and `.count()` throws a
+// synchronous TypeError — a trailing .catch() does NOT save you,
+// because no promise was ever created. That would 500 the whole
+// stats endpoint over an optional metric.
+const getFeedbackCounts = async () => {
+  try {
+    if (!prisma.feedback) {
+      console.warn('⚠️  No Feedback model on the Prisma client — satisfaction reported as 0.');
+      return { thumbsUp: 0, thumbsDown: 0 };
+    }
+    const [thumbsUp, thumbsDown] = await Promise.all([
+      prisma.feedback.count({ where: { rating: 1 } }),
+      prisma.feedback.count({ where: { rating: -1 } })
+    ]);
+    return { thumbsUp, thumbsDown };
+  } catch (err) {
+    console.warn('⚠️  Feedback counts unavailable:', err.message);
+    return { thumbsUp: 0, thumbsDown: 0 };
+  }
+};
+
+// ============================================================
+// DATABASE STATS
 // ============================================================
 router.get('/stats', authenticateToken, checkAdmin, async (req, res) => {
   try {
+    const [
+      users, courses, enrollments, materials,
+      chunks, chatSessions, messages, bookmarks, aiMessages
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.course.count(),
+      prisma.enrollment.count(),
+      prisma.material.count(),
+      prisma.materialChunk.count(),
+      prisma.chatSession.count(),
+      prisma.message.count(),
+      prisma.bookmark.count(),
+      prisma.message.count({ where: { role: 'assistant' } })
+    ]);
+
+    const { thumbsUp, thumbsDown } = await getFeedbackCounts();
+    const rated = thumbsUp + thumbsDown;
+
     const stats = {
-      users: await prisma.user.count(),
-      courses: await prisma.course.count(),
-      enrollments: await prisma.enrollment.count(),
-      materials: await prisma.material.count(),
-      chunks: await prisma.materialChunk.count(),
-      chatSessions: await prisma.chatSession.count(),
-      messages: await prisma.message.count(),
-      bookmarks: await prisma.bookmark.count()
+      users,
+      courses,
+      enrollments,
+      materials,
+      chunks,
+      chatSessions,
+      messages,
+      bookmarks,
+      // Added for the analytics dashboard
+      aiMessages,
+      studentQuestions: messages - aiMessages,
+      thumbsUp,
+      thumbsDown,
+      satisfactionRate: rated > 0 ? Math.round((thumbsUp / rated) * 100) : 0
     };
 
     res.json({ stats });
   } catch (err) {
+    console.error('❌ Error fetching stats:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -416,95 +467,99 @@ router.get('/stats', authenticateToken, checkAdmin, async (req, res) => {
 // ============================================================
 router.get('/analytics', authenticateToken, checkAdmin, async (req, res) => {
   try {
-    // Get materials per course
-    const coursesWithMaterials = await prisma.course.findMany({
-      include: {
-        _count: {
-          select: { materials: true }
-        }
-      }
+    // ── Materials and enrolments per course ────────────────────
+    const coursesWithCounts = await prisma.course.findMany({
+      select: {
+        name: true,
+        _count: { select: { materials: true, enrollments: true } }
+      },
+      orderBy: { name: 'asc' }
     });
 
-    const materialsPerCourse = coursesWithMaterials.map(course => ({
-      name: course.name,
-      materials: course._count.materials
+    const materialsPerCourse = coursesWithCounts.map(c => ({
+      name: c.name,
+      materials: c._count.materials,
+      enrollments: c._count.enrollments
     }));
 
-    // Get daily activity (last 7 days) - questions vs answers
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // ── Daily activity, last 7 days ───────────────────────────
+    // Keyed by ISO date, not weekday name. A weekday label collides
+    // as soon as the range covers the same day twice, and it is not
+    // parseable by new Date() on the client.
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
 
-    const dailyMessages = await prisma.message.findMany({
-      where: {
-        createdAt: { gte: sevenDaysAgo }
-      },
-      select: {
-        createdAt: true,
-        role: true
-      }
+    const recentMessages = await prisma.message.findMany({
+      where: { createdAt: { gte: sevenDaysAgo } },
+      select: { createdAt: true, role: true },
+      orderBy: { createdAt: 'asc' }
     });
 
-    // Process daily activity
-    const dailyActivityMap = {};
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
-      const dayString = date.toLocaleDateString('en-US', { weekday: 'short' });
-      dailyActivityMap[dayString] = { questions: 0, answers: 0 };
+    const dailyMap = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      dailyMap[key] = { date: key, questions: 0, answers: 0 };
     }
 
-    dailyMessages.forEach(msg => {
-      const dayString = new Date(msg.createdAt).toLocaleDateString('en-US', { weekday: 'short' });
-      if (msg.role === 'user') {
-        dailyActivityMap[dayString].questions += 1;
-      } else {
-        dailyActivityMap[dayString].answers += 1;
+    for (const msg of recentMessages) {
+      const key = msg.createdAt.toISOString().split('T')[0];
+      if (!dailyMap[key]) continue;
+      if (msg.role === 'user') dailyMap[key].questions += 1;
+      else                     dailyMap[key].answers   += 1;
+    }
+
+    const dailyActivity = Object.values(dailyMap);
+
+    // ── Questions and answers per course ──────────────────────
+    const sessions = await prisma.chatSession.findMany({
+      select: {
+        course: { select: { name: true } },
+        messages: { select: { role: true } }
       }
     });
 
-    const dailyActivity = Object.keys(dailyActivityMap).map(day => ({
-      day,
-      questions: dailyActivityMap[day].questions,
-      answers: dailyActivityMap[day].answers
-    })).reverse();
-
-    // Get course stats (enrollment by course)
-    const courseStats = await prisma.course.findMany({
-      include: {
-        _count: {
-          select: { enrollments: true }
-        }
+    const courseMap = {};
+    for (const session of sessions) {
+      const name = session.course?.name;
+      if (!name) continue;
+      if (!courseMap[name]) courseMap[name] = { questions: 0, answers: 0 };
+      for (const msg of session.messages) {
+        if (msg.role === 'user') courseMap[name].questions += 1;
+        else                     courseMap[name].answers   += 1;
       }
-    });
+    }
 
-    const courseStatsData = courseStats.map(course => ({
-      name: course.name,
-      enrollment: course._count.enrollments
-    }));
+    const courseStats = Object.entries(courseMap)
+      .map(([name, counts]) => ({ name, ...counts }))
+      .sort((a, b) => b.questions - a.questions);
 
-    // Get recent questions (from chat messages)
-    const recentMessages = await prisma.message.findMany({
+    // ── Recent student questions ──────────────────────────────
+    const recentUserMessages = await prisma.message.findMany({
       where: { role: 'user' },
-      include: {
-        session: {
-          include: {
-            user: { select: { name: true } }
-          }
-        }
+      select: {
+        id: true,
+        content: true,
+        createdAt: true,
+        session: { select: { user: { select: { name: true } } } }
       },
       orderBy: { createdAt: 'desc' },
-      take: 10
+      take: 50
     });
 
-    const recentQuestions = recentMessages.map(msg => ({
-      id: msg.id,
-      studentName: msg.session?.user?.name || 'Unknown',
-      question: msg.content || '',
-      timestamp: new Date(msg.createdAt).toLocaleDateString()
+    const recentQuestions = recentUserMessages.map(m => ({
+      id: m.id,
+      content: m.content || '',
+      createdAt: m.createdAt,
+      studentName: m.session?.user?.name || 'Unknown'
     }));
 
     res.json({
       materialsPerCourse,
       dailyActivity,
-      courseStats: courseStatsData,
+      courseStats,
       recentQuestions
     });
   } catch (err) {
